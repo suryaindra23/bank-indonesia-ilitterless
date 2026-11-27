@@ -5,10 +5,10 @@ import path from 'node:path';
 
 const formats = { '.mp4': ['video', 'video/mp4'], '.pptx': ['powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'], '.ppt': ['powerpoint', 'application/vnd.ms-powerpoint'], '.pdf': ['module', 'application/pdf'], '.docx': ['module', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'], '.doc': ['module', 'application/msword'] };
 const fail = (status, message) => {throw Object.assign(new Error(message), { status });};
-function embedURL(value) {
+export function embedURL(value) {
   try {
     const url = new URL(value);if (url.protocol !== 'https:' || url.username || url.password) throw Error();let id;
-    if (['youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtu.be'].includes(url.hostname)) {
+    if (['youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtu.be','www.youtube-nocookie.com'].includes(url.hostname)) {
       id = url.hostname === 'youtu.be' ? url.pathname.slice(1) : url.searchParams.get('v') || url.pathname.match(/^\/(?:shorts|embed)\/([^/]+)/)?.[1];if (!/^[\w-]{11}$/.test(id || '')) throw Error();return 'https://www.youtube-nocookie.com/embed/' + id;
     }
     if (['vimeo.com', 'www.vimeo.com', 'player.vimeo.com'].includes(url.hostname)) {id = url.pathname.match(/(?:video\/)?(\d+)\/?$/)?.[1];if (!id) throw Error();return 'https://player.vimeo.com/video/' + id;}
@@ -18,7 +18,7 @@ function embedURL(value) {
 export function mountMaterials(app, { read, transaction, requireRole, dataDir, storage }) {
   const directory = path.join(dataDir, 'materials');mkdirSync(directory, { recursive: true, mode: 0o700 });
   const upload = multer({ storage: multer.diskStorage({ destination: directory, filename: (_req, file, callback) => callback(null, randomUUID() + path.extname(file.originalname).toLowerCase()) }), limits: { fileSize: 50 * 1024 * 1024, files: 1, fields: 0 }, fileFilter: (_req, file, callback) => callback(formats[path.extname(file.originalname).toLowerCase()] ? null : Object.assign(new Error('Gunakan MP4, PowerPoint, PDF, atau Word.'), { status: 400 }), true) }).single('file');
-  app.post('/api/materials/file', requireRole('admin'), (req, res, next) => upload(req, res, async (error) => {
+  app.post('/api/materials/file', requireRole('admin','superadmin'), (req, res, next) => upload(req, res, async (error) => {
     if (error) return next(Object.assign(new Error(error.code === 'LIMIT_FILE_SIZE' ? 'Ukuran berkas maksimal 50 MB.' : 'Unggahan berkas tidak valid.'), { status: 400 }));
     try {
       if (!req.file) fail(400, 'Pilih berkas materi.');
@@ -45,6 +45,7 @@ export function mountMaterials(app, { read, transaction, requireRole, dataDir, s
     await storage.serve(res,'materials/'+file.filename,{mime:file.mime,name:file.name,download:!(file.mime==='application/pdf'||file.kind==='video')});
   });
   app.post('/api/lessons/:id/complete', requireRole('peserta'), async (req, res) => {
-    const awarded = await transaction(req.account.id, 'material.complete', (state) => {const lesson=state.lessons?.find(lesson=>lesson.id===req.params.id&&!lesson.archived);if(!lesson)fail(404,'Materi tidak tersedia atau telah diarsipkan.');const user = state.users.find((user) => user.id === req.account.id);if (user.ls.includes(lesson.id)) return 0;user.ls.push(lesson.id);return 20;});res.json({ awarded });
+    const awarded = await transaction(req.account.id, 'material.complete', (state) => {const lesson=state.lessons?.find(lesson=>lesson.id===req.params.id&&!lesson.archived);if(!lesson)fail(404,'Materi tidak tersedia atau telah diarsipkan.');const user = state.users.find((user) => user.id === req.account.id);if (user.ls.includes(lesson.id)) return 0;if(!user.openedLessons?.includes(lesson.id))fail(409,'Buka materi dahulu sebelum mencatat partisipasi belajar.');user.ls.push(lesson.id);user.learningAwards??={};user.learningAwards[lesson.id]=state.pointRules?.learning??20;return user.learningAwards[lesson.id];});res.json({ awarded,meaning:'Partisipasi belajar berdasarkan pengakuan warga, bukan bukti pemahaman.' });
   });
+  app.post('/api/lessons/:id/open', requireRole('peserta'), async(req,res)=>{await transaction(req.account.id,'material.open',s=>{if(!s.lessons.some(l=>l.id===req.params.id&&!l.archived))fail(404,'Materi tidak tersedia.');const user=s.users.find(u=>u.id===req.account.id);user.openedLessons??=[];if(!user.openedLessons.includes(req.params.id))user.openedLessons.push(req.params.id);});res.json({ok:true});});
 }

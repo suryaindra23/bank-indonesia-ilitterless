@@ -1,6 +1,7 @@
 import {createClient} from '@supabase/supabase-js';
 import {mkdir,writeFile,readFile,unlink} from 'node:fs/promises';
 import path from 'node:path';
+import {Readable} from 'node:stream';
 const checked=key=>{if(!/^(photos|materials)\/[a-f0-9-]+\.[a-z0-9]+$/.test(key))throw Error('Invalid storage key');return key;};
 export function createObjectStore({dataDir,remote=!!process.env.SUPABASE_URL}={}){
  if(!remote)return {
@@ -30,6 +31,6 @@ export function createObjectStore({dataDir,remote=!!process.env.SUPABASE_URL}={}
   },
   async signUpload(object){return unwrap(await bucket.createSignedUploadUrl(checked(object),{upsert:false})).signedUrl;},
   async remove(object){unwrap(await bucket.remove([checked(object)]));},
-  async serve(res,object,{name,download=false}={}){const signed=unwrap(await bucket.createSignedUrl(checked(object),120,download?{download:name}:undefined));res.redirect(302,signed.signedUrl);},
+  async serve(res,object,{name,download=false,proxy=false,mime}={}){if(proxy){const blob=unwrap(await bucket.download(checked(object)));res.type(mime||path.extname(object));res.set('Cache-Control','no-store');return Readable.fromWeb(blob.stream()).on('error',error=>res.destroy(error)).pipe(res);}const signed=unwrap(await bucket.createSignedUrl(checked(object),120,download?{download:name}:undefined));res.redirect(302,signed.signedUrl);},
  };
 }

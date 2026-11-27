@@ -7,7 +7,7 @@ async function directUpload(file,purpose){
  return api('/uploads/'+signed.id+'/complete',{});
 }
 export async function api(path, body) {
- if(['/actions','/articles'].includes(path)&&typeof body?.photo==='string'&&body.photo.startsWith('data:image/')){
+ if(typeof body?.photo==='string'&&body.photo.startsWith('data:image/')){
   const blob=await (await fetch(body.photo)).blob(),file=new File([blob],'foto.'+(blob.type.split('/')[1]||'jpeg'),{type:blob.type});
   const uploaded=await directUpload(file,'photo');if(uploaded)body={...body,photo:uploaded.photo};
  }

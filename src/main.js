@@ -1,5 +1,8 @@
 new MutationObserver(()=>{for(const c of document.querySelectorAll('.stack td:not([data-l])')){let i=0,p=c;while(p=p.previousElementSibling)i+=p.colSpan;c.dataset.l=c.closest('table').rows[0].cells[i]?.textContent||''}}).observe(document,{childList:true,subtree:true})
 import QRCode from 'qrcode';
+import {managementUI,loadManagement,bindManagement} from './management-ui.js';
+import {reportUI,reportSummary} from './report-ui.js';
+import {historyUI} from './resident-history-ui.js';
 import {communityManagementUI,membersUI,communityOptions,communityTypeLabels} from './community-management-ui.js';
 import {materialManagementUI} from './material-management-ui.js';
 import {accessPage} from './access-ui.js';
@@ -12,7 +15,8 @@ import {profileForm,quizScreen,quizAdminForm,activityFeed} from './participation
 import {communityOf} from '../shared/community.js';
 import { readPhoto } from './storage.js';
 import { api, queued, enqueue, flushQueue, uploadMaterial } from './api.js';
-import { TILES, MIS, LES, LOCS as DEFAULT_LOCS, DAILY_POINTS, MISSION_POINTS, ARTICLE_POINTS } from '../shared/catalog.js';
+import { TILES, MIS, LES, LOCS as DEFAULT_LOCS, DAILY_POINTS, MISSION_POINTS, ARTICLE_POINTS as DEFAULT_ARTICLE_POINTS } from '../shared/catalog.js';
+let ARTICLE_POINTS=DEFAULT_ARTICLE_POINTS;
 let LOCS=[...DEFAULT_LOCS],REPORT_LOCS=[...DEFAULT_LOCS];
 import { CARBON_FACTORS, CARBON_SOURCE, co2e, factorPerKg, carbonByMaterial } from '../shared/carbon.js';
 
@@ -78,8 +82,8 @@ const ART={
  tanam:SH+'<path d="M25 40h30l-4 18H29z" fill="url(#iP)"/><rect x="23" y="35" width="34" height="8" rx="3" fill="#b8653a"/><path d="M40 35V20" stroke="#1d8a44" stroke-width="3" stroke-linecap="round"/><path d="M40 27c-10-1-15-8-13-15 8 0 13 6 13 15zM40 23c9-1 13-7 12-13-8 0-12 5-12 13z" fill="url(#iG)"/><path d="M63 8c-3 5-4.5 7.5-4.5 9.5a4.5 4.5 0 0 0 9 0C67.5 15.5 66 13 63 8z" fill="url(#iD)"/>'+HL('M29 46l1.2 8'),
  jalan:SH+'<circle cx="22" cy="44" r="12" fill="none" stroke="#1f2f3a" stroke-width="4"/><circle cx="58" cy="44" r="12" fill="none" stroke="#1f2f3a" stroke-width="4"/><circle cx="22" cy="44" r="2.5" fill="#1f2f3a"/><circle cx="58" cy="44" r="2.5" fill="#1f2f3a"/><path d="M22 44l12-18h16l8 18M34 26l6 18H22M46 17h8" stroke="#007573" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M28 20h11" stroke="#1f2f3a" stroke-width="4" stroke-linecap="round"/>'+HL('M14 38a10 10 0 0 1 5-4')};
 $('#bdefs').innerHTML=BIBU_DEFS+ILLO_DEFS;
-const T=id=>TILES.find(t=>t.id===id);
-const illo=id=>`<svg class="illo" viewBox="0 0 80 64" aria-hidden="true"><circle cx="40" cy="34" r="30" fill="${CATS[T(id).cat].bg}"/>${ART[id]}</svg>`;
+const T=id=>TILES.find(t=>t.id===id)||{id,n:'Aksi lingkungan',cat:'green',hint:'Foto bukti kegiatan.'};
+const illo=id=>`<svg class="illo" viewBox="0 0 80 64" aria-hidden="true"><circle cx="40" cy="34" r="30" fill="${CATS[T(id).cat].bg}"/>${ART[id]||ART.tanam}</svg>`;
 const hills=`<svg class="hills" viewBox="0 0 400 84" preserveAspectRatio="xMidYMax slice" aria-hidden="true"><path d="M0 84V48l44-16 34 10 50-30 42 24 30-8 56 26 44-22 50 18 50-12v54z" style="fill:var(--tint)"/><g style="fill:var(--tint2)"><path d="M318 70l5-42 5 42z"/><rect x="312" y="68" width="22" height="5" rx="2"/></g><path d="M0 84V62q60-20 120-6t130-6 150-4v38z" style="fill:var(--tint)" opacity=".6"/><g style="fill:var(--tint2)" opacity=".8"><circle cx="36" cy="66" r="9"/><circle cx="50" cy="69" r="7"/><circle cx="372" cy="66" r="8"/></g><path d="M0 84V76q200-14 400 0v8z" style="fill:var(--bg)"/></svg>`;
 
 const REW=[];
@@ -96,7 +100,8 @@ const S={role:'peserta',account:null,community:[],me:null,auth:'email',tab:'home
 S.residentFilters=emptyResidentFilters();
 S.articles=[];S.articleDraft={body:'',participants:'',occurredOn:'',photo:null,err:''};
 async function sync(){
- const data=await api('/bootstrap');S.communityOptions=(await api('/community-options')).communities;S.account=data.account;S.me=data.account.role==='peserta'?data.account.id:null;
+ const data=await api('/bootstrap');S.report=data.report;S.communityOptions=data.account.role==='bi'?[]:(await api('/community-options')).communities;S.account=data.account;S.me=data.account.role==='peserta'?data.account.id:null;
+ if(data.actionTypes){TILES.splice(0,TILES.length,...data.actionTypes.filter(t=>t.active!==false));for(const t of data.actionTypes)DAILY_POINTS[t.id]=t.points;}S.pointRules=data.pointRules;ARTICLE_POINTS=data.pointRules?.article??DEFAULT_ARTICLE_POINTS;
  if(data.locations)LOCS=data.locations;if(data.reportLocations)REPORT_LOCS=data.reportLocations;
  const presentation=new Map(users.map(u=>[u.id,{shown:u.shown,lastStg:u.lastStg}]));
  users.splice(0,users.length,...data.users.map(u=>({...u,...presentation.get(u.id),ls:new Set(u.ls)})));
@@ -152,18 +157,20 @@ function authScr(){const f=S.form;
 
 function articleCard(article,admin=false){
  const labels={pending:'Menunggu kurasi',verified:'Lolos kurasi',rejected:'Belum diterima'};
- return `<article class="card article-card"><div class="row sp"><span class="pill p-${article.status}">${labels[article.status]}</span><span class="s">${article.status==='verified'?'+'+ARTICLE_POINTS+' poin':''}</span></div>
+ return `<article class="card article-card"><div class="row sp"><span class="pill p-${article.status}">${labels[article.status]}</span><span class="s">${article.status==='verified'?'+'+(article.awardedPoints??ARTICLE_POINTS)+' poin':''}</span></div>
  ${admin?`<h3>${esc(U(article.uid)?.name||'Warga')}</h3>`:''}<img class="article-proof" src="${esc(article.photo)}" alt="Foto kegiatan untuk kurasi" loading="lazy">
  <p class="s">Tanggal kegiatan: ${esc(article.occurredOn)}</p><details><summary>Baca tulisan dan pihak yang terlibat</summary><p class="article-copy">${esc(article.body)}</p><h3>Pihak yang terlibat</h3><p class="article-copy">${esc(article.participants)}</p></details>
  <p class="s">${article.emailStatus==='sent'?'Email terkirim ke tim iLitterless.':article.emailStatus==='sending'?'Email sedang dikirim.':'Email belum terkirim; pengajuan sudah tersimpan.'}</p>
  ${article.emailStatus!=='sent'?`<button class="btn o sm" data-article-send="${article.id}">Kirim ulang email ke tim</button>`:''}
  ${article.reason?`<p class="err">${esc(article.reason)}</p>`:''}
- ${admin&&article.status==='pending'?`<button class="btn n" data-article-ok="${article.id}" ${article.emailStatus==='sent'?'':'disabled'}>Setujui artikel · +${ARTICLE_POINTS} poin</button><form data-article-review="${article.id}" class="article-form"><label>Alasan penolakan<textarea name="reason" required maxlength="500" rows="2"></textarea></label><button class="btn rd" type="submit">Tolak dengan alasan</button></form>`:''}</article>`;
+ ${!admin&&['pending','rejected'].includes(article.status)?`<button class="btn o" data-own-article-edit="${article.id}">Edit artikel</button><details><summary>Tarik pengajuan</summary><form data-own-article-archive="${article.id}" class="admin-form"><label>Alasan penarikan<textarea name="reason" required minlength="5" maxlength="500"></textarea></label><button class="btn rd" type="submit">Arsipkan pengajuan</button></form></details>`:''}
+ ${admin&&article.status==='pending'?`<button class="btn n" data-article-ok="${article.id}" ${article.emailStatus==='sent'?'':'disabled'}>Setujui artikel · +${S.pointRules?.article??ARTICLE_POINTS} poin</button><form data-article-review="${article.id}" class="article-form"><label>Alasan penolakan<textarea name="reason" required maxlength="500" rows="2"></textarea></label><button class="btn rd" type="submit">Tolak dengan alasan</button></form>`:''}</article>`;
 }
 function communityRankingList(groups,ownName){const format=value=>new Intl.NumberFormat('id-ID').format(value);return `<ol class="community-standings">${groups.map(group=>`<li class="community-standing ${(group.id===ownName||group.l.toLowerCase()===ownName.toLowerCase())?'is-own':''}" data-community="${esc(group.l)}"><span class="community-rank" aria-label="${group.rank?'Peringkat '+group.rank:'Belum berperingkat'}">${group.rank||'·'}</span><div><h3>${esc(group.l)}</h3><p class="s">${communityTypeLabels[group.type]||'Komunitas'}</p>${group.l.toLowerCase()===ownName.toLowerCase()?'<span class="community-own-label">Komunitas Anda</span>':''}<p class="s">${group.members} anggota · ${group.verified} aksi disetujui</p>${group.id?`<button class="btn o sm" data-community-members="${esc(group.id)}">Lihat anggota</button>`:''}</div><div class="community-points"><strong>${format(group.points)}</strong><span class="s">poin</span></div></li>`).join('')}</ol>`;}
 
 /* ---------- resident screens ---------- */
 const SCR={
+riwayat(){return historyUI(S);},
 home(){const u=U(S.me),p=pts(S.me),i=stg(p),nx=STG[i+1],sd=saldo(S.me),g=S.gain;
  const pose=g>0?'proud':u.mood==='cheer'?'cheer':'wave';
  const say=g>0?`Hore! Poin Anda bertambah ${g}. Terima kasih!`:u.mood==='cheer'?'Tidak apa-apa. Coba foto ulang ya, saya tunggu!':'Yuk, lakukan aksi baik hari ini.';
@@ -171,6 +178,7 @@ home(){const u=U(S.me),p=pts(S.me),i=stg(p),nx=STG[i+1],sd=saldo(S.me),g=S.gain;
  <div class="hgrid"><div class="txt"><h2 class="t1" style="font-size:var(--fs-xl)">Halo, ${first(u.name)}!</h2><div class="bubble">${say}</div></div><div class="${g>0?'pop':''}">${bibu(pose,{cls:g>0?'':'bob',crown:i>=2})}</div></div></div>
  <div class="pad">
  <button class="mega" data-start><span class="cam">${ic('cam','width:34px;height:34px;color:var(--btn)')}</span><span><span class="h">Catat aksi hari ini</span><small>Foto aksinya, petugas mengecek</small></span></button>
+ <section class="card article-entry"><h3>Penjemputan sampah</h3><p class="s">Hubungi tim iLitterless melalui WhatsApp untuk mengajukan penjemputan. Jadwal menunggu konfirmasi tim.</p><a class="btn n" data-pickup href="https://wa.me/6282150387645?text=${encodeURIComponent('Halo tim iLitterless, saya ingin mengajukan penjemputan sampah.\n\nNama:\nAlamat penjemputan:\nJenis sampah:\nPerkiraan berat / jumlah:\nUsulan waktu penjemputan:')}" target="_blank" rel="noopener noreferrer">${ic('chat')}Minta penjemputan</a></section>
  <div class="card article-entry"><h3>Cerita kegiatan warga</h3><p class="s">Kirim foto dan tulisan ke tim iLitterless. Dapatkan ${ARTICLE_POINTS} poin setelah lolos kurasi.</p><button class="btn o" data-go="artikel">Kirim artikel kegiatan</button></div>
  <div class="pcard"><div class="row sp" style="align-items:flex-start;position:relative"><div><div class="lbl">Poin Anda</div><div class="num" id="ptsNum">${g>0?sd-g:sd}</div></div><button class="btn ghost sm" data-go="hadiah">${ic('gift')}Tukar hadiah</button></div>${g>0?`<span class="gain">+${g}</span>`:''}
  <div style="margin-top:12px;position:relative"><div class="b">${STG[i][1]}</div><div class="lbl">${nx?`${nx[0]-p} poin lagi, Bibu tumbuh jadi ${STG[i+1][1]}`:'Tahap tertinggi'}</div><div class="bar" style="margin-top:8px"><i style="width:${nx?Math.min(100,(p-STG[i][0])/(nx[0]-STG[i][0])*100):100}%"></i></div></div></div>
@@ -182,16 +190,16 @@ profil(){return profileForm(U(S.me),S.profileRequired,S.communityOptions||[])},
 kuis(){return quizScreen(S.quiz)},
 
 catat(){const c=S.c;
- if(c.step===1)return `<div class="screen">${head('Aksi apa yang Anda lakukan?')}<div class="pad"><div class="row"><div style="width:72px;flex:none">${bibu('cool')}</div><p style="margin:0" class="s">Poin diberikan setelah disetujui, satu kali per jenis aksi per hari.</p></div><div class="tiles">${TILES.map(t=>`<button class="tile" data-tile="${t.id}">${illo(t.id)}${t.n}<small class="s">+${DAILY_POINTS[t.id]} poin</small></button>`).join('')}</div></div></div>`;
+ if(c.step===1)return `<div class="screen">${head('Aksi apa yang Anda lakukan?')}<div class="pad"><div class="row"><div style="width:72px;flex:none">${bibu('cool')}</div><p style="margin:0" class="s">Poin diberikan setelah disetujui, satu kali per jenis aksi per hari.</p></div><div class="tiles">${TILES.map(t=>`<button class="tile" data-tile="${t.id}">${illo(t.id)}${esc(t.n)}<small class="s">+${DAILY_POINTS[t.id]} poin</small></button>`).join('')}</div></div></div>`;
  const t=T(c.tile);
  if(c.step===2)return `<div class="screen">${head('Foto buktinya',1,'data-step')}<div class="pad">
- <div class="row">${illo(t.id)}<span class="b" style="font-size:var(--fs-l)">${t.n}</span></div>
+ <div class="row">${illo(t.id)}<span class="b" style="font-size:var(--fs-l)">${esc(t.n)}</span></div>
  <p class="s">Foto kegiatan yang disetujui petugas dapat tampil di Beranda dan kegiatan terbaru.</p>
- <div class="shot">${c.photo?`<img src="${c.photo}" alt="Foto bukti">`:`<div><span class="cam">${ic('cam','width:46px;height:46px')}</span><div class="b" style="font-size:var(--fs-l)">Ketuk untuk memotret</div><div class="s" style="padding:0 16px">${t.hint}</div></div>`}<input type="file" accept="image/*" capture="environment" id="fPhoto" aria-label="Ambil foto bukti"></div>
+ <div class="shot">${c.photo?`<img src="${c.photo}" alt="Foto bukti">`:`<div><span class="cam">${ic('cam','width:46px;height:46px')}</span><div class="b" style="font-size:var(--fs-l)">Ketuk untuk memotret</div><div class="s" style="padding:0 16px">${esc(t.hint)}</div></div>`}<input type="file" accept="image/*" capture="environment" id="fPhoto" aria-label="Ambil foto bukti"></div>
  ${c.photo?'':`<details class="faq"><summary>Kamera tidak mau terbuka?</summary><ol style="margin:8px 0 0;padding-inline-start:20px;display:grid;gap:6px"><li>Saat HP bertanya izin kamera, pilih <b>Izinkan</b>.</li><li>Jika terlanjur menolak: buka Pengaturan HP, pilih Aplikasi, pilih browser Anda, lalu Izin, Kamera, Izinkan.</li><li>Atau pilih foto yang sudah ada di galeri.</li><li>Tidak bisa juga? Tunjukkan Kartu Bibu ke petugas agar aksi dicatatkan.</li></ol></details>`}</div>
  ${c.photo?(c.sending!=null?`<div class="dock"><div class="b" role="status">Mengirim foto…</div><div class="s">Tunggu sampai server mengonfirmasi penyimpanan.</div></div>`:`<div class="dock"><button class="btn y w" data-submit>${S.offline?'Simpan, kirim saat ada sinyal':'Kirim ke petugas'}</button><button class="btn link w" data-retake>Foto ulang</button></div>`):''}</div>`;
  return `<div class="screen"><div class="pad" style="text-align:center;padding-top:32px"><div style="width:210px;margin:0 auto" class="pop">${bibu('proud')}</div><h2 class="t1">Terima kasih!</h2>
- <p style="font-size:var(--fs-m);margin:0">${c.queued?`Aksi <b>${t.n}</b> tersimpan di perangkat. Buka aplikasi saat koneksi kembali untuk mengirimkannya.`:`Aksi <b>${t.n}</b> sudah tersimpan di server dan menunggu pemeriksaan petugas. Hasilnya muncul di riwayat dan kabar terbaru.`}</p></div>
+ <p style="font-size:var(--fs-m);margin:0">${c.queued?`Aksi <b>${esc(t.n)}</b> tersimpan di perangkat. Buka aplikasi saat koneksi kembali untuk mengirimkannya.`:`Aksi <b>${esc(t.n)}</b> sudah tersimpan di server dan menunggu pemeriksaan petugas. Hasilnya muncul di riwayat dan kabar terbaru.`}</p></div>
  <div class="dock"><button class="btn y w" data-go="home">Kembali ke beranda</button><button class="btn link w" data-start>Catat aksi lain</button></div></div>`},
 belajar(){const u=U(S.me);return head('Belajar')+`<div class="pad"><div class="row" style="border:1px solid var(--line);border-radius:var(--r-m);padding:12px"><div style="width:100px;flex:none">${bibu('read')}</div><div><div class="b" style="font-size:var(--fs-l)">${LES.filter(lesson=>u.ls.has(lesson.id)).length} dari ${LES.length} materi selesai</div><div class="s">Modul pembelajaran dari tim iLitterless. Kuis mingguan tersedia di menu Kuis.</div><div class="bar" style="margin-top:8px"><i style="width:${Math.min(100,LES.filter(lesson=>u.ls.has(lesson.id)).length/Math.max(1,LES.length)*100)}%"></i></div></div></div>
  <div class="list">${LES.map(L=>{const d=u.ls.has(L.id);return `<div style="padding:12px 0;border-top:1px solid var(--line)" class="lrow"><div class="row" style="align-items:flex-start"><span class="cic" style="background:var(--sea)">${ic(L.i)}</span><div style="flex:1"><div class="b" style="font-size:var(--fs-m)">${esc(L.t)}</div><div class="s">${d?'Sudah selesai':L.q?'Modul teks':({video:'Video',powerpoint:'PowerPoint',module:'Modul',text:'Teks manual'}[L.kind]||'Materi')}</div></div>${d?pill('verified').replace('Sudah dicek','Selesai'):''}</div>
@@ -242,7 +250,7 @@ saya(){const u=U(S.me),p=pts(S.me),my=mine(S.me).slice().reverse();
  <p class="s" style="margin:-4px 0 0">Tunjukkan kartu ini ke petugas agar aksi Anda bisa dicatatkan.</p>
 <section class="card profile-details"><div class="row sp"><h3>Profil lengkap</h3><button class="btn o sm" data-go="profil">Edit profil</button></div><dl><div><dt>Asal</dt><dd>${esc(originLabels[u.profile?.originType]||'Belum diisi')}</dd></div><div><dt>Nama asal</dt><dd>${esc(u.profile?.originName||'—')}</dd></div><div><dt>No. WhatsApp</dt><dd>${esc(u.profile?.whatsapp||u.phone||'—')}</dd></div><div><dt>Kecamatan</dt><dd>${esc(u.profile?.district||'—')}</dd></div><div><dt>Kota / Kabupaten</dt><dd>${esc(u.profile?.city||'—')}</dd></div></dl></section> <div class="card"><div class="b">Komunitas ${esc(communityOf(u))}</div><p class="s">${community?.points||0} poin bersama · ${community?.rank?'Peringkat '+community.rank:'Belum berperingkat'}</p><button class="btn o sm" data-go="komunitas">Lihat komunitas</button></div>
  ${(()=>{const T=trx.filter(t=>t.uid===S.me);if(!T.length)return '';const cb=carbonByMaterial(T);return `<div class="sec"><h3>Dampak setoran Anda <small>${fmtC(cb.kg)} kg</small></h3><div class="card"><div class="s">Emisi yang dihindari</div><div class="b" style="font-size:var(--fs-2xl);color:var(--sea)">${fmtC(cb.total)} <span class="s">kg CO₂e</span></div>${carbonRows(cb)}<p class="s" style="margin:8px 0 0">${carbonNote}</p></div></div>`})()}
-</div><div class="profile-secondary"> <div class="sec"><h3>Riwayat aksi <small>${my.length} aksi</small></h3><div class="list">${my.length?my.slice(0,6).map(a=>`<div class="ch">${illo(a.tile)}<span><span class="b" style="display:block;font-size:var(--fs-m)">${a.act}</span><span class="s" style="display:block">Minggu ${a.week} · ${a.day}${a.src==='petugas'?' · dicatat petugas':''}${a.reason?` · ${esc(a.reason)}`:''}</span><span style="display:block;margin-top:4px">${pill(a.status)}</span></span><span></span></div>`).join(''):'<div class="s" style="padding:12px 0">Belum ada aksi. Yuk mulai dari tombol hijau besar di beranda.</div>'}</div></div>
+</div><div class="profile-secondary"> <div class="sec"><h3>Riwayat aksi <small>${my.length} aksi</small></h3><div class="list">${my.length?my.slice(0,6).map(a=>`<div class="ch">${illo(a.tile)}<span><span class="b" style="display:block;font-size:var(--fs-m)">${esc(a.act)}</span><span class="s" style="display:block">Minggu ${a.week} · ${a.day}${a.src==='petugas'?' · dicatat petugas':''}${a.reason?` · ${esc(a.reason)}`:''}</span><span style="display:block;margin-top:4px">${pill(a.status)}</span></span><span></span></div>`).join(''):'<div class="s" style="padding:12px 0">Belum ada aksi. Yuk mulai dari tombol hijau besar di beranda.</div>'}</div></div>
  <div class="sec"><h3>Lencana</h3><div class="bdg">${B.map(([n,ok,ii])=>`<div class="bd ${ok?'':'lk'}"><span class="m">${ic(ii,'width:26px;height:26px')}</span>${n}</div>`).join('')}</div></div>
 
  <div class="sec"><h3>Ukuran tulisan</h3><div class="seg"><button data-size="0" class="${S.big?'':'on'}">Normal</button><button data-size="1" class="${S.big?'on':''}" style="font-size:var(--fs-l)">Besar</button></div></div>
@@ -254,8 +262,8 @@ function sheet(){const sh=S.sheet;if(!sh)return '';
  if(sh.t==='help')return `<div class="sheet" data-bg><div><div class="row sp"><h2 class="t1" style="font-size:var(--fs-xl)">Bantuan</h2><button class="back" data-close aria-label="Tutup">${ic('x')}</button></div>
  <div class="row" style="border:1px solid var(--line);border-radius:var(--r-m);padding:8px"><div style="width:80px;flex:none">${bibu('happy')}</div><p style="font-size:var(--fs-m)">Butuh bantuan? Datangi petugas COBI di kelurahan Anda. Tunjukkan Kartu Bibu agar petugas dapat membantu pencatatan.</p></div>
  <div>${[['Bagaimana cara mencatat aksi?','Tekan "Catat aksi hari ini", pilih gambar aksi, lalu unggah foto.'],['Di mana hasil pemeriksaan?','Lihat Riwayat aksi di menu Saya atau Kabar terbaru di Beranda.'],['Saya tidak bisa memotret. Bagaimana?','Tunjukkan Kartu Bibu di menu Saya ke petugas. Petugas akan mencatatkan aksi Anda.'],['Poin bisa ditukar dengan apa?','Buka Hadiah. Kupon yang didapat ditunjukkan ke petugas saat pengambilan.']].map(([q,a])=>`<details class="faq"><summary>${q}</summary><p style="margin-top:4px;font-size:var(--fs-m)">${a}</p></details>`).join('')}</div></div></div>`;
- if(sh.t==='rew'){const r=REW.find(x=>x.id===sh.id);return `<div class="sheet" data-bg><div>${sh.code?`<div style="width:130px;margin:0 auto" class="pop">${bibu('proud')}</div><h2 class="t1" style="font-size:var(--fs-xl);text-align:center">Kupon berhasil dibuat</h2><div class="vch"><div class="s">${r.n}</div><div class="code">${sh.code}</div></div><p>Tunjukkan kode ini ke petugas atau toko mitra. Kupon tersimpan di halaman Tukar hadiah.</p><button class="btn n w" data-close>Selesai</button>`
-  :`<h2 class="t1" style="font-size:var(--fs-xl)">Tukar ${r.p} poin dengan ${r.n}?</h2><p>Sisa poin Anda nanti: <b>${saldo(S.me)-r.p}</b>.</p><button class="btn y w" data-redeem="${r.id}">Ya, tukar</button><button class="btn link w" data-close>Batal</button>`}</div></div>`}
+ if(sh.t==='rew'){const r=REW.find(x=>x.id===sh.id)||sh.voucher||{n:'Hadiah tidak lagi tersedia',p:0};return `<div class="sheet" data-bg><div>${sh.code?`<div style="width:130px;margin:0 auto" class="pop">${bibu('proud')}</div><h2 class="t1" style="font-size:var(--fs-xl);text-align:center">Kupon berhasil dibuat</h2><div class="vch"><div class="s">${esc(r.n)}</div><div class="code">${sh.code}</div></div><p>Tunjukkan kode ini ke petugas atau toko mitra. Kupon tersimpan di halaman Tukar hadiah.</p><button class="btn n w" data-close>Selesai</button>`
+  :`<h2 class="t1" style="font-size:var(--fs-xl)">Tukar ${r.p} poin dengan ${esc(r.n)}?</h2><p>Sisa poin Anda nanti: <b>${saldo(S.me)-r.p}</b>.</p><button class="btn y w" data-redeem="${r.id}" ${r.id?'':'disabled'}>Ya, tukar</button><button class="btn link w" data-close>Batal</button>`}</div></div>`}
  const L=LES.find(l=>l.id===sh.id),q=L.q,pdf=isPDFMaterial(L);
  return `<div class="sheet ${pdf?'lesson-pdf':''}" data-bg><div><div class="row sp"><span class="s">Materi iLitterless</span><button class="back" data-close aria-label="Tutup">${ic('x')}</button></div><h2 class="t1" style="font-size:var(--fs-xl)">${esc(L.t)}</h2>
  ${pdf?pdfReaderUI(L):L.kind==='video'?(L.videoEmbed?`<iframe class="lesson-video" referrerpolicy="strict-origin-when-cross-origin" src="${esc(L.videoEmbed)}" title="${esc(L.t)}" allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen></iframe>`:`<video class="lesson-video" src="/api/material-files/${L.fileId}" controls preload="metadata"></video>`):L.fileId?`<a class="btn n" href="/api/material-files/${L.fileId}" target="_blank" rel="noopener">Buka / unduh ${L.kind==='powerpoint'?'PowerPoint':'modul'}: ${esc(L.fileName)}</a>`:`<button class="btn ${S.speaking?'rd':'n'} w" data-speak="${L.id}">${ic('sound')}${S.speaking?'Berhenti':'Dengarkan materi'}</button>`}
@@ -267,7 +275,7 @@ function sheet(){const sh=S.sheet;if(!sh)return '';
 
 function countUp(el,from,to){if(reduce||!el){if(el)el.textContent=to;return}const t0=performance.now(),d=1000;
  const step=t=>{const k=Math.min(1,(t-t0)/d),e=1-Math.pow(1-k,3);el.textContent=Math.round(from+(to-from)*e);if(k<1)requestAnimationFrame(step)};requestAnimationFrame(step)}
-function renderP(){pdfCleanup();pdfCleanup=()=>{};if(S.me&&S.profileRequired)S.tab='profil';const ph=$('#phone');
+function renderP(){pdfCleanup();pdfCleanup=()=>{};if(S.me&&S.profileRequired)S.tab='profil';if(S.me)history.replaceState(null,'',location.pathname+location.search+'#'+S.tab);const ph=$('#phone');
  ph.dataset.screen=S.tab;
  $('#scr').dataset.screen=S.tab;
  document.body.classList.toggle('resident-signed-in',!!S.me);
@@ -279,7 +287,14 @@ ph.classList.toggle('noauth',!S.me);ph.classList.toggle('big',S.big);
   S.gain=S.tab==='home'&&sd>u.shown?sd-u.shown:0;
   if(!S.sheet&&i>u.lastStg&&S.tab==='home'){u.lastStg=i;S.sheet={t:'grow',i}}
   if(S.loading){$('#scr').innerHTML=`<div class="pad" aria-busy="true" aria-label="Memuat"><div class="sk" style="height:24px;width:40%"></div><div class="sk" style="height:40px;width:70%"></div><div class="sk" style="height:100px"></div><div class="sk" style="height:150px"></div><div class="sk" style="height:200px"></div></div>`;$('#sheet').innerHTML='';$('#tabbar').innerHTML='';netBar();return}
-  $('#scr').innerHTML=SCR[S.tab]();$('#sheet').innerHTML=sheet();
+  $('#scr').innerHTML=(SCR[S.tab]||SCR.home)();$('#sheet').innerHTML=sheet();
+  if(S.tab==='belajar')$('#scr .pad')?.insertAdjacentHTML('afterbegin','<p class="learning-participation-note">Poin belajar mencatat partisipasi berdasarkan pengakuan Anda, bukan bukti pemahaman. Buka materi sebelum menandai selesai. Kuis mingguan tersedia melalui Beranda.</p>');
+  if(['home','saya'].includes(S.tab))$('#scr .pad')?.insertAdjacentHTML('beforeend','<details class="faq"><summary>Tentang COBI dan Kartu Bibu</summary><p>COBI adalah Community Base Of iLitterless Indonesia. Kartu Bibu adalah identitas warga untuk bantuan pencatatan. Bibu tumbuh menunjukkan tahapan akumulasi poin, bukan penilaian pemahaman belajar.</p></details>');
+  const completion=$('#sheet [data-complete]');if(completion&&!completion.disabled)completion.textContent='Catat partisipasi belajar · +'+(S.pointRules?.learning??20)+' poin';
+  if(S.tab==='artikel'&&S.articleDraft.editId)$('#articleForm [type=submit]')?.insertAdjacentHTML('beforebegin','<label>Alasan perubahan<textarea id="articleEditReason" required minlength="5" maxlength="500">'+esc(S.articleDraft.reason||'')+'</textarea></label>');
+  if(S.tab==='saya')$('#scr .profile-secondary .sec')?.insertAdjacentHTML('beforeend','<button class="btn o" data-go="riwayat">Lihat semua riwayat</button>');
+  if(S.tab==='riwayat'&&!S.residentHistory&&!S.historyError&&!S.historyLoading)loadResidentHistory();
+  if(!S.sheet&&S.focused){S.focused=null;const selector=S.dialogTrigger,index=S.dialogTriggerIndex||0;requestAnimationFrame(()=>document.querySelectorAll(selector||'#tabbar button')[index]?.focus({preventScroll:true}));}
   const reader=$('[data-pdf-reader]');if(reader)import('./pdf-reader.js').then(({mountPDF})=>{if(reader.isConnected)pdfCleanup=mountPDF(reader);}).catch(()=>{if(reader.isConnected)reader.querySelector('[data-pdf-status]').textContent='Pembaca PDF tidak dapat dimuat. Buka berkas melalui tombol di bawah.';});
   {const sh=$('#sheet .sheet');if(sh){sh.setAttribute('role','dialog');sh.setAttribute('aria-modal','true');const h=sh.querySelector('h2');if(h){h.id='shT';h.tabIndex=-1;sh.setAttribute('aria-labelledby','shT');if(S.focused!==S.sheet){S.focused=S.sheet;h.focus({preventScroll:true})}}}}
   if(S.gain>0){countUp($('#ptsNum'),sd-S.gain,sd);confetti();u.mood=null}
@@ -297,8 +312,8 @@ ph.classList.toggle('noauth',!S.me);ph.classList.toggle('big',S.big);
 /* ---------- staff ---------- */
 function renderA(){const q=acts.filter(a=>a.status==='pending'),tot=Math.round(trx.reduce((s,t)=>s+t.kg,0)*10)/10,h=S.help;
  let body='';
- if(S.atab==='antrian')body=q.length?`<div class="q">${q.map(a=>`<article class="card"><img src="${a.photo}" alt="Bukti ${a.act}"><div class="row sp"><span class="b">${esc(U(a.uid).name)}</span>${pill('pending')}</div><div class="s">${U(a.uid).bibu} · ${U(a.uid).loc} · Minggu ${a.week} · ${a.day}</div>
-  <div class="row">${illo(a.tile)}<div><div class="b">${a.act}</div><div class="s">${a.mission?'Tantangan: '+MIS.find(m=>m.id===a.mission).t:'Aksi bebas'}</div></div></div>
+ if(S.atab==='antrian')body=q.length?`<div class="q">${q.map(a=>`<article class="card"><img src="${a.photo}" alt="Bukti ${esc(a.act)}"><div class="row sp"><span class="b">${esc(U(a.uid).name)}</span>${pill('pending')}</div><div class="s">${U(a.uid).bibu} · ${esc(U(a.uid).loc)} · Minggu ${a.week} · ${a.day}</div>
+  <div class="row">${illo(a.tile)}<div><div class="b">${esc(a.act)}</div><div class="s">${a.mission?'Tantangan: '+MIS.find(m=>m.id===a.mission).t:'Aksi bebas'}</div></div></div>
   ${S.rej===a.id?`<label>Alasan penolakan<select id="rej-${a.id}"><option>Foto kurang jelas</option><option>Foto tidak sesuai aksi</option><option>Foto sama dengan laporan lain</option></select></label><div class="row"><button class="btn rd sm" style="flex:1" data-no="${a.id}">Ya, tolak</button><button class="btn o sm" style="flex:1" data-rejc>Batal</button></div>`
    :`<div class="row"><button class="btn gr sm" style="flex:1" data-ok="${a.id}">${ic('check')}Setujui</button><button class="btn o sm" style="flex:1" data-rej="${a.id}">Tolak…</button></div>`}</article>`).join('')}</div>`:'<div class="card empty">Semua aksi sudah dicek. Antrian kosong.</div>';
  if(S.atab==='bantu'){const sel=h.uid&&U(h.uid);
@@ -306,7 +321,7 @@ function renderA(){const q=acts.filter(a=>a.status==='pending'),tot=Math.round(t
   <p class="s" style="margin:0">Cari warga menggunakan nama atau ID pada Kartu Bibu.</p>
   <label>Atau cari nama / Bibu ID<input type="search" id="hq" value="${esc(h.q)}" placeholder="Contoh: Ayu atau BIBU-LWK-0002"></label><div class="who" id="who"></div>
   ${sel?`<div class="row" style="background:var(--soft);border-radius:var(--r-s);padding:8px 12px">${ic('user','width:28px;height:28px')}<div><div class="b">${esc(sel.name)}</div><div class="s">${sel.bibu} · ${sel.loc}</div></div></div>`:'<div class="s">Belum ada warga dipilih.</div>'}</div>
-  <div class="card" style="display:grid;gap:12px;align-content:start"><div class="b" style="font-size:var(--fs-m)">2. Aksi yang dilakukan warga</div><div class="tiles">${TILES.map(t=>`<button class="tile ${h.tile===t.id?'on':''}" data-htile="${t.id}">${illo(t.id)}${t.n}</button>`).join('')}</div>
+  <div class="card" style="display:grid;gap:12px;align-content:start"><div class="b" style="font-size:var(--fs-m)">2. Aksi yang dilakukan warga</div><div class="tiles">${TILES.map(t=>`<button class="tile ${h.tile===t.id?'on':''}" data-htile="${t.id}">${illo(t.id)}${esc(t.n)}</button>`).join('')}</div>
   <label>3. Foto (opsional)<input type="file" accept="image/*" capture="environment" id="hPhoto"></label>
   <button class="btn gr" data-hsave ${sel&&h.tile?'':'disabled'}>${ic('check')}Simpan sebagai sudah dicek</button>
   <div class="s">Aksi yang dicatat petugas langsung dianggap sudah dicek dan ditandai "dibantu petugas" di laporan, terpisah dari catatan mandiri warga.</div></div></div>`}
@@ -315,7 +330,7 @@ function renderA(){const q=acts.filter(a=>a.status==='pending'),tot=Math.round(t
   <label>Material<select id="tM"><option>Plastik</option><option>Kertas</option><option>Logam</option><option>Kaca</option></select></label>
   <label>Berat (kg)<input type="number" id="tK" min="0.1" max="100" step="0.1" value="1.0"></label>
   <div class="s" id="tCO2" aria-live="polite">Perkiraan emisi dihindari: <b>${fmtC(co2e('Plastik',1))} kg CO₂e</b></div>
-  <button class="btn n sm" type="submit">Simpan setoran</button><div class="s">+30 poin per setoran untuk warga.</div></form>
+  <button class="btn n sm" type="submit">Simpan setoran</button><div class="s">+${S.pointRules?.transaction??30} poin per setoran untuk warga.</div></form>
   <div class="card"><div class="b" style="margin-bottom:4px">Setoran terbaru</div><div class="scroll"><table class="stack"><thead><tr><th>Warga</th><th>Material</th><th>Minggu</th><th class="r">Berat</th><th class="r">CO₂e dihindari</th></tr></thead><tbody>${trx.slice(-10).reverse().map(t=>`<tr><td>${esc(U(t.uid).name)}</td><td>${t.mat}</td><td>${t.week}</td><td class="r">${fmt(t.kg)} kg</td><td class="r">${fmtC(co2e(t.mat,t.kg))} kg</td></tr>`).join('')}</tbody></table></div></div></div>`;
  if(S.atab==='peserta')body=`<form id="residentForm" class="card" style="display:grid;gap:12px;margin-bottom:24px"><h2>Daftar warga tanpa akun</h2><p class="s">Untuk warga yang dibantu petugas. Profil ini tidak memiliki login email.</p><label>Nama warga<input name="name" minlength="2" maxlength="60" required></label><label>Kelurahan<select name="loc">${LOCS.map(l=>`<option>${l}</option>`).join('')}</select></label><button class="btn n" type="submit">Daftarkan warga</button></form><div class="card">${residentFiltersUI(users.filter(user=>!user.deletedAt),S.residentFilters)}<div class="scroll" style="margin-top:8px"><table class="stack"><thead><tr><th>Bibu ID</th><th>Nama</th><th>Asal</th><th>Kecamatan</th><th>Kota / Kabupaten</th><th>Kelurahan</th><th class="r">Poin</th><th class="r">Sudah dicek</th><th class="r">Dibantu petugas</th><th class="r">BSIL</th><th class="r">Minggu aktif</th></tr></thead><tbody id="ptab"></tbody></table></div></div>`;
  if(S.atab==='hadiah')body=`<div class="two"><div class="card"><h2>Stok hadiah</h2><p class="s">Aktifkan stok hanya untuk hadiah yang tersedia.</p>${REW.map(r=>`<form class="stock-form row" data-stock="${r.id}" style="margin-top:16px"><label style="flex:1">${esc(r.n)} · ${r.p} poin<input name="stock" aria-label="Stok ${esc(r.n)}" type="number" min="0" max="100000" value="${r.stock}" required></label><button class="btn n sm" type="submit">Simpan</button></form>`).join('')}</div><form class="card" id="voucherForm" style="display:grid;gap:16px;align-content:start"><h2>Serahkan hadiah</h2><label>Kode kupon<input name="code" placeholder="BBB-…" required></label><button class="btn n" type="submit">Tandai kupon digunakan</button><p class="s">Periksa kode kupon dan hadiah sebelum mengonfirmasi penyerahan.</p></form></div>`;
@@ -327,6 +342,10 @@ function renderA(){const q=acts.filter(a=>a.status==='pending'),tot=Math.round(t
  $('#v-admin').innerHTML=`<section class="band phead"><div class="wrap"><div class="dashboard-intro"><div><span class="chip">Dashboard Petugas iLitterless</span><h1 style="margin-top:8px">${q.length} aksi warga menunggu dicek</h1><p class="s">Kelola verifikasi, kurasi artikel, materi belajar, setoran BSIL, serta hadiah warga.</p></div><div class="dashboard-bibu">${bibu('idea')}</div></div>
  <div class="kpis">${[['Menunggu dicek',q.length],['Warga terdaftar',users.length],['Aksi sudah dicek',acts.filter(a=>a.status==='verified').length],['Dibantu petugas',acts.filter(a=>a.src==='petugas'&&a.status!=='cancelled').length],['Setoran BSIL',fmt(tot)+' kg']].map(([k,v])=>`<div class="card kpi"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('')}</div></div></section>
  <section class="band" style="padding-top:16px"><div class="wrap"><div class="tabs">${[['antrian',`Antrian cek (${q.length})`],['kegiatan','Kelola kegiatan'],['artikel','Kurasi artikel'],['kuis','Kelola kuis'],['belajar','Kelola belajar'],['komunitas','Kelola komunitas'],['bantu','Bantu catat warga'],['trx','Setoran BSIL'],['peserta','Database warga'],['hadiah','Hadiah & kupon']].map(([k,v])=>`<button data-atab="${k}" class="${S.atab===k?'on':''}">${v}</button>`).join('')}<a class="btn o sm" href="/api/reports/export" download>Unduh laporan CSV</a></div>${body}</div></section>`;
+ $('#v-admin .tabs')?.insertAdjacentHTML('beforeend','<button data-atab="pengelolaan" class="'+(S.atab==='pengelolaan'?'on':'')+'">Pengelolaan data</button>');
+ if(S.atab==='pengelolaan'){const area=$('#v-admin .tabs').parentElement;area.insertAdjacentHTML('beforeend',managementUI(false));queueMicrotask(loadManagement);}
+ const learningNote=$('#materialForm p.s');if(learningNote)learningNote.textContent='Materi terbit langsung tersedia untuk warga. Partisipasi belajar memberi '+(S.pointRules?.learning??20)+' poin sekali, berdasarkan pengakuan warga.';
+ if(S.atab==='kuis'){for(const field of document.querySelectorAll('#quizAdminForm [data-question-index]'))field.insertAdjacentHTML('afterbegin',`<label>Ambil dari bank soal<select data-bank-question><option value="">Pilih soal tersimpan</option>${(S.questionLibrary||[]).map(q=>`<option value="${esc(q.id)}">${esc(q.text)}</option>`).join('')}</select></label>`);}
  if(S.atab==='peserta')ptab();if(S.atab==='bantu')who()}
 function residentProfileDetails(user){const p=user.profile||{},fields=[['Nama',user.name],['Email',user.email||'Tanpa akun email'],['WhatsApp',p.whatsapp||user.phone||'Belum diisi'],['Jenis asal',originLabels[p.originType]||'Belum diisi'],['Nama asal',p.originName||'Belum diisi'],['Kelurahan',user.loc],['Kecamatan',p.district||'Belum diisi'],['Kota / Kabupaten',p.city||'Belum diisi'],['Status profil',p.completedAt?'Lengkap':'Belum lengkap']];return `<details class="resident-profile-details"><summary>Lihat profil</summary><dl>${fields.map(([label,value])=>`<div><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`).join('')}</dl></details>`;}
 function ptab(query){if(query!==undefined)S.residentFilters.q=query;const filtered=filterResidents(users,S.residentFilters);$('#residentFilterCount').textContent=`Menampilkan ${filtered.length} dari ${users.filter(user=>!user.deletedAt).length} warga`;
@@ -336,53 +355,11 @@ function ptab(query){if(query!==undefined)S.residentFilters.q=query;const filter
 function who(){const f=S.help.q.trim().toLowerCase();$('#who').innerHTML=f?users.filter(u=>!u.deletedAt&&(u.name+u.bibu).toLowerCase().includes(f)).slice(0,6).map(u=>`<button data-huser="${u.id}" class="${S.help.uid===u.id?'on':''}"><span>${esc(u.name)}</span><span class="s">${u.bibu}</span></button>`).join('')||'<div class="s">Tidak ditemukan.</div>':''}
 
 /* ---------- Bank Indonesia ---------- */
-const pc=(a,b)=>b?Math.round(a/b*100):0;
-const inLoc=uid=>S.biLoc==='all'||U(uid).loc===S.biLoc;
-function wk(w){const US=users.filter(u=>inLoc(u.id)),reg=US.filter(u=>u.reg<=w),A=acts.filter(a=>a.week<=w&&inLoc(a.uid)&&a.status!=='outbox'&&a.status!=='cancelled'),TR=trx.filter(t=>t.week<=w&&inLoc(t.uid)),act=reg.filter(u=>A.some(a=>a.uid===u.id));
- const V=A.filter(a=>a.status==='verified').length,R=A.filter(a=>a.status==='rejected').length;
- const cons=act.filter(u=>new Set(A.filter(a=>a.uid===u.id).map(a=>a.week)).size>=2).length;
- return{reach:reg.length,act:pc(act.length,reg.length),actN:act.length,eng:new Set(acts.filter(a=>a.week===w&&inLoc(a.uid)&&a.status!=='outbox'&&a.status!=='cancelled').map(a=>a.uid)).size,ver:pc(V,V+R),V,P:A.filter(a=>a.status==='pending').length,cons:pc(cons,act.length),consN:cons,kg:Math.round(TR.reduce((s,t)=>s+t.kg,0)*10)/10,trx:TR.length,A,TR}}
-const spark=(vals,sel)=>{const mx=Math.max(...vals),mn=Math.min(...vals),r=mx-mn||1,pt=vals.map((v,i)=>[i*100/Math.max(1,vals.length-1),26-(v-mn)/r*22]);
- return `<svg class="spk" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true"><polyline points="${pt.map(p=>p.join(',')).join(' ')}" fill="none" stroke="var(--sea)" stroke-width="2.5" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>${pt.map((p,i)=>`<circle cx="${p[0]}" cy="${p[1]}" r="${i===sel?3.2:2}" fill="${i===sel?'var(--sea)':'var(--card)'}" stroke="var(--sea)" stroke-width="1.5" vector-effect="non-scaling-stroke"/>`).join('')}</svg>`};
-const delta=(d,unit,first)=>{if(first)return '<span class="dl">Minggu pertama pilot</span>';const r=Math.round(d*10)/10;return r>0?`<span class="dl up">${ic('up')}+${fmt(r)}${unit} dari minggu lalu</span>`:r<0?`<span class="dl dn">${ic('down')}${fmt(r)}${unit} dari minggu lalu</span>`:'<span class="dl">Sama dengan minggu lalu</span>'};
-const stamp=()=>new Date().toLocaleString('id-ID',{timeZone:'Asia/Jakarta',day:'numeric',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'}).replace(/\./g,'.')+' WIB';
-function biSummary(){const w=S.biWeek,c=wk(w),where=S.biLoc==='all'?REPORT_LOCS.length+' kelurahan':'Kelurahan '+S.biLoc;
- return `Ringkasan pilot COBI, ${where}, Minggu ${w} (data per ${stamp()})
-- Reach: ${c.reach} dari ${S.biLoc==='all'?60:20} warga target terdaftar
-- Activation: ${c.act}% (${c.actN} warga sudah beraksi)
-- Engagement: ${c.eng} warga aktif di minggu ${w}
-- Verification: ${c.ver}% aksi disetujui (${c.P} menunggu)
-- Consistency: ${c.cons}% warga aktif 2 minggu atau lebih
-- Output BSIL: ${fmt(c.kg)} kg dari ${c.trx} setoran
-- Emisi dihindari (perkiraan, ${CARBON_SOURCE.name}): ${fmtC(carbonByMaterial(c.TR).total)} kg CO₂e
-Sumber: database COBI.`}
-function renderB(){const w=S.biWeek,Wk=Array.from({length:WEEK},(_,i)=>wk(i+1)),c=Wk[w-1],p=Wk[w-2],tgt=S.biLoc==='all'?60:20;
- const VA=c.A.filter(a=>a.status==='verified'&&a.src==='app').length,VP=c.A.filter(a=>a.src==='petugas').length;
- const assistedOnly=users.filter(u=>inLoc(u.id)&&c.A.some(a=>a.uid===u.id)&&c.A.filter(a=>a.uid===u.id).every(a=>a.src==='petugas')).length;
- const K=[['Reach',`${c.reach}/${tgt}`,`${pc(c.reach,tgt)}% target warga terdaftar`,'reach',' warga'],['Activation',c.act+'%',`${c.actN} warga sudah beraksi`,'act',' poin %'],['Engagement',c.eng,`warga aktif minggu ${w}`,'eng',' warga'],['Verification',c.ver+'%',`${c.V} disetujui · ${c.P} menunggu`,'ver',' poin %'],['Consistency',c.cons+'%',`${c.consN} warga aktif ≥2 minggu`,'cons',' poin %'],['Output BSIL',fmt(c.kg)+' kg',`${c.trx} setoran tercatat`,'kg',' kg']];
- const W=Array.from({length:WEEK},(_,i)=>i+1).map(x=>{const A=acts.filter(a=>a.week===x&&inLoc(a.uid));return{w:x,v:A.filter(a=>a.status==='verified').length,p:A.filter(a=>a.status==='pending').length,r:A.filter(a=>a.status==='rejected').length}}),mx=Math.max(...W.map(x=>x.v+x.p+x.r),1);
- const loc=REPORT_LOCS.map(l=>{const us=users.filter(u=>u.loc===l&&u.reg<=w),A=acts.filter(a=>a.week<=w&&U(a.uid).loc===l);return{l,n:us.length,a:us.filter(u=>A.some(a=>a.uid===u.id)).length,v:A.filter(a=>a.status==='verified').length,k:Math.round(trx.filter(t=>t.week<=w&&U(t.uid).loc===l).reduce((s,t)=>s+t.kg,0)*10)/10,c:us.filter(u=>new Set(A.filter(a=>a.uid===u.id).map(a=>a.week)).size>=2).length}});
- const cat=Object.entries(CATS).map(([k,cc])=>({n:cc.n,c:k==='plastic'?'var(--sea)':k==='waste'?'var(--navy)':'var(--mute)',v:c.A.filter(a=>a.cat===k&&a.status==='verified').length})),cm=Math.max(...cat.map(x=>x.v),1);
- const mats=['Plastik','Kertas','Logam','Kaca'].map(m=>({m,k:Math.round(c.TR.filter(t=>t.mat===m).reduce((s,t)=>s+t.kg,0)*10)/10})),mm=Math.max(...mats.map(x=>x.k),1);
- const src=[['Dicatat warga sendiri',VA,'var(--sea)'],['Dibantu petugas',VP,'var(--mute)'],['Setoran BSIL (transaksi)',c.trx,'var(--navy)']],sm=Math.max(...src.map(x=>x[1]),1);
- const where=S.biLoc==='all'?REPORT_LOCS.length+' kelurahan':'Kelurahan '+S.biLoc;
- $('#v-bi').innerHTML=`<section class="band phead"><div class="wrap"><div class="row sp" style="flex-wrap:wrap;align-items:flex-start"><span class="ro">${ic('shield','width:16px;height:16px')}Read-only · data agregat, tanpa identitas individu</span><button class="btn o sm" data-copysum>${ic('book','width:18px;height:18px')}Salin ringkasan</button></div>
- <div class="dashboard-intro"><h1>${c.actN} dari ${c.reach} warga sudah beraksi; ${c.cons}% di antaranya aktif di 2 minggu atau lebih</h1><div class="dashboard-bibu">${bibu('earth')}</div></div>
- <p class="note" style="font-size:var(--fs-s);margin:0">Pilot COBI · ${where} · Minggu ${w} · data per ${stamp()}</p>
- <a class="btn o sm" href="/api/reports/export" download>Unduh laporan CSV</a>
- <div class="filt" role="group" aria-label="Saring data"><span class="s b">Kelurahan</span><div class="tabs">${['all',...REPORT_LOCS].map(l=>`<button data-biloc="${l}" class="${S.biLoc===l?'on':''}" aria-pressed="${S.biLoc===l}">${l==='all'?'Semua':l}</button>`).join('')}</div><span class="s b">Minggu</span><div class="tabs">${Array.from({length:WEEK},(_,i)=>i+1).map(x=>`<button data-biweek="${x}" class="${w===x?'on':''}" aria-pressed="${w===x}">${x}</button>`).join('')}</div></div>
- <div class="kpis">${K.map(([k,v,s2,key,unit])=>`<div class="card kpi"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s2}</div>${delta(p?c[key]-p[key]:0,unit,!p)}${spark(Wk.map(x=>x[key]),w-1)}</div>`).join('')}</div>
- <p class="s" style="margin:0">Garis kecil menunjukkan minggu program; titik penuh menandai minggu yang dipilih. "Poin %" berarti selisih persentase.</p></div></section>
- <section class="band"><div class="wrap"><div class="two">
- <div class="card"><div class="b" style="font-size:var(--fs-m)">Aksi per minggu menurut status pengecekan</div><div class="lg" style="margin:8px 0"><span style="--c:var(--sea)">Disetujui</span><span style="--c:var(--mute)">Menunggu</span><span style="--c:var(--reject)">Ditolak</span></div>
- ${W.map(x=>`<div class="hb" style="${x.w===w?'':'opacity:.55'}"><span class="b">Minggu ${x.w}</span>${x.w>WEEK?'<span class="s">Belum berjalan</span>':`<div class="tr"><i style="width:${x.v/mx*100}%;background:var(--sea)"></i><i style="width:${x.p/mx*100}%;background:var(--mute)"></i><i style="width:${x.r/mx*100}%;background:var(--reject)"></i></div>`}<span class="b" style="text-align:right">${x.v+x.p+x.r||''}</span></div>`).join('')}
- <div class="b" style="font-size:var(--fs-m);margin-top:16px">Sumber pencatatan (s.d. minggu ${w})</div>${src.map(([n,v,cc])=>`<div class="hb"><span class="b" style="font-size:var(--fs-xs)">${n}</span><div class="tr"><i style="width:${v/sm*100}%;background:${cc}"></i></div><span class="b" style="text-align:right">${v}</span></div>`).join('')}
- <p class="s">${assistedOnly} warga hanya tercatat lewat bantuan petugas, tanpa memakai aplikasi sendiri. Tanpa Mode Dibantu Petugas, mereka tidak akan masuk hitungan Activation.</p></div>
- <div class="card"><div class="b" style="font-size:var(--fs-m)">Aksi disetujui per kategori (s.d. minggu ${w})</div>${cat.map(x=>`<div class="hb"><span class="b">${x.n}</span><div class="tr"><i style="width:${x.v/cm*100}%;background:${x.c}"></i></div><span class="b" style="text-align:right">${x.v}</span></div>`).join('')}
- <div class="b" style="font-size:var(--fs-m);margin-top:16px">Material BSIL (kg)</div>${mats.map(x=>`<div class="hb"><span class="b">${x.m}</span><div class="tr"><i style="width:${x.k/mm*100}%;background:var(--sea)"></i></div><span class="b" style="text-align:right">${fmt(x.k)}</span></div>`).join('')}
- ${(()=>{const cb=carbonByMaterial(c.TR);return `<div class="b" style="font-size:var(--fs-m);margin-top:16px">Emisi dihindari dari setoran (s.d. minggu ${w})</div><div class="b" style="font-size:var(--fs-2xl);color:var(--sea)">${fmtC(cb.total)} <span class="s">kg CO₂e</span></div>${cb.kg?carbonRows(cb):'<p class="s">Belum ada setoran.</p>'}`})()}</div></div>
- <div class="card"><div class="b" style="font-size:var(--fs-m);margin-bottom:4px">Capaian per kelurahan (s.d. minggu ${w})</div><div class="scroll"><table class="stack"><thead><tr><th>Kelurahan</th><th class="r">Terdaftar</th><th class="r">Sudah beraksi</th><th class="r">Aksi disetujui</th><th class="r">Aktif ≥2 minggu</th><th class="r">BSIL</th></tr></thead><tbody>${loc.map(l=>`<tr style="${S.biLoc!=='all'&&S.biLoc!==l.l?'opacity:.5':''}"><td class="b">${l.l}</td><td class="r">${l.n} / 20</td><td class="r">${l.a} (${pc(l.a,l.n)}%)</td><td class="r">${l.v}</td><td class="r">${l.c}</td><td class="r">${fmt(l.k)} kg</td></tr>`).join('')}</tbody></table></div></div>
- <p class="note">Angka dihitung dari catatan pada database server. Laporan CSV mencakup seluruh periode. Emisi dihindari adalah perkiraan berdasarkan ${CARBON_SOURCE.name} (daur ulang dibanding TPA), memakai kategori Mixed Plastics, Mixed Paper (general), Mixed Metals, dan Glass. Faktornya disusun untuk kondisi TPA Amerika Serikat, jadi angka ini perlu dikalibrasi sebelum dipakai sebagai klaim resmi.</p></div></section>`}
+function biSummary(){return reportSummary(S);}
+function renderB(){
+ $('#v-bi').innerHTML=reportUI(S);
+ $('#v-bi .phead .wrap')?.insertAdjacentHTML('afterbegin','<p class="s">'+(S.biLoc==='all'?'Semua kelurahan':'Kelurahan '+esc(S.biLoc))+' · Minggu '+S.biWeek+'</p>');
+}
 
 function renderActivityView(){if(S.role==='superadmin')renderSuperadmin();else renderA();}
 async function loadActivities(){const request=S.activityRequest=(S.activityRequest||0)+1,params=new URLSearchParams({page:String(S.activityPage||1)});if(S.activityQuery)params.set('q',S.activityQuery);if(S.activityStatus)params.set('status',S.activityStatus);
@@ -401,7 +378,7 @@ async function loadGroups(){try{S.groupData=await api('/admin/communities');S.gr
 async function loadMembers(){const id=S.memberGroup;try{const data=await api('/communities/'+encodeURIComponent(id)+'/members?'+new URLSearchParams({page:String(S.memberPage||1),q:S.memberQuery||''}));if(id!==S.memberGroup)return;S.memberData=data;S.memberError='';}catch(error){if(id!==S.memberGroup)return;S.memberError=error.message;}if(S.role==='admin')renderA();else renderP();$('#communityMembers')?.scrollIntoView({block:'start'});}
 function renderMaterials(){const focused=document.activeElement?.matches('#materialSearch [name=q]'),caret=focused?document.activeElement.selectionStart:null;if(S.role==='superadmin')renderSuperadmin();else if(S.role==='admin'){const panel=$('#materialManagerPanel');if(panel)panel.innerHTML=materialManagementUI(S);else renderA();}if(focused){const input=$('#materialSearch [name=q]');input?.focus({preventScroll:true});input?.setSelectionRange(caret,caret);}}
 async function loadMaterials(){const request=S.materialRequest=(S.materialRequest||0)+1;try{const data=await api('/material-management?'+new URLSearchParams({q:S.materialQuery||'',status:S.materialStatus||'',page:String(S.materialPage||1),history:String(!!S.materialHistory)}));if(request!==S.materialRequest)return;S.materialData=data;S.materialError='';}catch(error){if(request!==S.materialRequest)return;S.materialError=error.message;}if((S.role==='admin'&&S.atab==='belajar')||(S.role==='superadmin'&&S.accessTab==='materials'))renderMaterials();}
-function renderSuperadmin(){if(!$('#v-superadmin')||!S.account||S.role!=='superadmin')return;const focused=document.activeElement?.matches('#accessSearch [name=q]'),caret=focused?document.activeElement.selectionStart:null;$('#v-superadmin').innerHTML=accessPage(S)+(S.accessTab==='materials'?'<div class="wrap">'+materialManagementUI(S)+'</div>':S.accessTab==='activities'?'<div class="wrap">'+activityManagementUI(S)+'</div>':S.accessTab==='locations'?'<div class="wrap">'+locationsUI(S)+'</div>':'');if(focused){const input=$('#accessSearch [name=q]');if(input){input.focus({preventScroll:true});input.setSelectionRange(caret,caret);}}if(!['activities','locations','materials'].includes(S.accessTab)&&!S.accessData&&!S.accessError&&!S.accessLoading)loadAccess();}
+function renderSuperadmin(){if(!$('#v-superadmin')||!S.account||S.role!=='superadmin')return;const focused=document.activeElement?.matches('#accessSearch [name=q]'),caret=focused?document.activeElement.selectionStart:null;$('#v-superadmin').innerHTML=accessPage(S)+(S.accessTab==='materials'?'<div class="wrap">'+materialManagementUI(S)+'</div>':S.accessTab==='activities'?'<div class="wrap">'+activityManagementUI(S)+'</div>':S.accessTab==='locations'?'<div class="wrap">'+locationsUI(S)+'</div>':'');addManagementAccess();if(focused){const input=$('#accessSearch [name=q]');if(input){input.focus({preventScroll:true});input.setSelectionRange(caret,caret);}}if(!['activities','locations','materials','management'].includes(S.accessTab)&&!S.accessData&&!S.accessError&&!S.accessLoading)loadAccess();}
 
 function render(){
  if(!S.account)S.role='peserta';
@@ -420,14 +397,25 @@ function render(){
  }
  if(access)access.hidden=true;
  document.querySelectorAll('[data-role]').forEach(b=>b.classList.toggle('on',b.dataset.role===S.role));
- ({peserta:renderP,admin:renderA,bi:renderB,superadmin:renderSuperadmin})[S.role]()}
+ ({peserta:renderP,admin:renderA,bi:renderB,superadmin:renderSuperadmin})[S.role]();
+ if(S.role==='superadmin')addManagementAccess();}
+function addManagementAccess(){const nav=$('#v-superadmin nav.tabs');if(nav&&!nav.querySelector('[data-access-tab="management"]'))nav.insertAdjacentHTML('beforeend','<button data-access-tab="management" class="'+(S.accessTab==='management'?'on':'')+'">Pengelolaan data</button>');}
+function renderManagementAdmin(){renderSuperadmin();addManagementAccess();const area=$('#v-superadmin .access-layout');area.querySelectorAll(':scope > form,:scope > .access-user-list,:scope > .access-pagination').forEach(n=>n.remove());area.insertAdjacentHTML('beforeend',managementUI(true));loadManagement();}
+async function loadResidentHistory(){const request=S.historyRequest=(S.historyRequest||0)+1;S.historyLoading=true;try{const data=await api('/my/activities?'+new URLSearchParams({page:S.historyPage||1,status:S.historyStatus||'',from:S.historyFrom||'',to:S.historyTo||''}));if(request!==S.historyRequest)return;S.residentHistory=data;S.historyError='';}catch(error){if(request!==S.historyRequest)return;S.historyError=error.message;}finally{if(request===S.historyRequest)S.historyLoading=false;}if(S.tab==='riwayat')renderP();}
+bindManagement(async()=>{await sync();});
 const residentPage=location.pathname.startsWith('/warga');
 const route=()=>{
+ const destination=decodeURIComponent(location.hash.slice(1));
+ if(S.account?.role==='peserta'&&SCR[destination]&&!['catat','profil'].includes(destination))S.tab=destination;
+ if(S.account?.role==='admin'&&['antrian','kegiatan','artikel','kuis','belajar','komunitas','bantu','trx','peserta','hadiah','pengelolaan'].includes(destination)){S.atab=destination;if(destination==='pengelolaan')queueMicrotask(loadManagement);}
+ if(S.account?.role==='superadmin'&&['users','history','activities','materials','locations','admin-history','management'].includes(destination))S.accessTab=destination;
  S.role=S.account?.role||'peserta';
  if(S.account&&(!dashboardRole&&!residentPage||residentPage&&S.role!=='peserta')){location.replace(dashboardPaths[S.role]+location.hash);return;}
  if(dashboardRole&&S.account&&S.role!==dashboardRole)S.role='denied';
  if(S.role==='admin'&&location.hash==='#artikel')S.atab='artikel';
- render();scrollTo(0,0);
+ render();if(S.role==='superadmin'&&destination==='management')renderManagementAdmin();
+ if(S.role==='admin'){if(S.atab==='kuis'&&!S.quizAdmin)Promise.all([api('/admin/quiz'),api('/manage/questions')]).then(([quiz,bank])=>{S.quizAdmin=quiz;S.questionLibrary=bank.options.questions;if(S.atab==='kuis')renderA();}).catch(error=>toast(error.message));if(S.atab==='belajar'&&!S.materialData)loadMaterials();if(S.atab==='komunitas'&&!S.groupData)loadGroups();if(S.atab==='kegiatan'&&!S.activityData)loadActivities();}
+ if(S.role==='superadmin'){if(S.accessTab==='materials'&&!S.materialData)loadMaterials();if(S.accessTab==='activities'&&!S.activityData)loadActivities();if(S.accessTab==='locations'&&!S.locationData)loadLocations();}scrollTo(0,0);
 };
 addEventListener('hashchange',route);
 const top0=()=>{$('#scr').scrollTop=0};
@@ -437,6 +425,12 @@ const stopSpeak=()=>{try{speechSynthesis.cancel()}catch(x){}S.speaking=false};
 const speak=id=>{try{const ss=speechSynthesis;if(S.speaking){stopSpeak();return}const L=LES.find(l=>l.id===id),u=new SpeechSynthesisUtterance([L.t,...L.body].join('. '));u.lang='id-ID';u.rate=.95;u.onend=()=>{S.speaking=false;renderP()};ss.cancel();ss.speak(u);S.speaking=true}catch(e){toast('Suara belum tersedia di perangkat ini.')}};
 document.addEventListener('click',async e=>{const profile=document.querySelector('.account-profile[open]');if(profile&&!profile.contains(e.target))profile.open=false;const t=e.target.closest('button,[data-bg]');if(!t)return;const d=t.dataset;
  try {
+ if(d.ownArticleEdit){const a=S.articles.find(a=>a.id===d.ownArticleEdit);S.articleDraft={...a,editId:a.id,err:'',reason:''};renderP();top0();return;}
+ if(d.accessTab==='management'){S.accessRequestId=(S.accessRequestId||0)+1;S.accessLoading=false;S.accessTab='management';history.pushState(null,'',location.pathname+'#management');renderManagementAdmin();return;}
+ if(d.accessTab!==undefined)history.replaceState(null,'',location.pathname+'#'+d.accessTab);
+ if(d.atab)history.pushState(null,'',location.pathname+'#'+d.atab);
+ if(d.help!==undefined||d.les||d.rew){S.dialogTrigger=Object.entries(d).filter(([key])=>['help','les','rew'].includes(key)).map(([key,value])=>`button[data-${key}="${CSS.escape(value)}"]`).join('');S.dialogTriggerIndex=[...document.querySelectorAll(S.dialogTrigger)].indexOf(t);}
+ if(d.historyPage||d.historyRetry!==undefined){S.historyPage=Number(d.historyPage)||1;return loadResidentHistory();}
  if(t.id==='demoNet'){setNet(!S.offline);return}
  if(d.bg!==undefined){if(e.target===t){S.sheet=null;stopSpeak();renderP()}return}
  if(d.role){if(d.role==='peserta'){location.assign('/warga/');return}location.hash=d.role;return}
@@ -469,7 +463,7 @@ document.addEventListener('click',async e=>{const profile=document.querySelector
  if(d.accessPage!==undefined){S.accessPage=Number(d.accessPage);return refreshAccess()}
  if(d.resetResidentFilters!==undefined){S.residentFilters=emptyResidentFilters();return renderA()}
  if(d.logout!==undefined){await api('/auth/logout',{});S.memberGroup=null;S.memberData=null;S.groupData=null;S.groupDelete=null;S.materialRequest=(S.materialRequest||0)+1;S.materialData=null;S.materialEdit=null;S.materialQuery='';S.materialHistory=false;S.materialStatus='';S.materialPage=1;S.materialError='';S.userDecision=null;S.locationData=null;S.locationDraft='';S.locationQuery='';S.locationPage=1;S.locationError='';S.accessRequestId=(S.accessRequestId||0)+1;S.accessLoading=false;S.activityRequest=(S.activityRequest||0)+1;S.activityData=null;S.activityEdit=null;S.activityQuery='';S.activityHistory=false;S.activityPage=1;S.accessData=null;S.accessQuery='';S.accessTab='users';S.accessPage=1;S.accessError='';S.account=null;S.me=null;S.auth='email';S.form={email:'',password:'',name:'',loc:'',err:''};S.wa=[];S.sheet=null;users.length=acts.length=trx.length=0;return route()}
- if(d.go){S.tab=d.go;renderP();top0();return}
+ if(d.go){if(d.go==='riwayat'){S.residentHistory=null;S.historyError='';S.historyPage=1;}history.pushState(null,'',location.pathname+location.search+'#'+d.go);S.tab=d.go;renderP();top0();return}
  if(d.start!==undefined){S.c=d.start?{step:2,tile:d.start,photo:null}:{step:1,tile:null,photo:null};S.tab='catat';renderP();top0();return}
  if(d.tile){S.c={step:2,tile:d.tile,photo:null};renderP();top0();return}
  if(d.step){S.c.step=+d.step;S.c.photo=null;return renderP()}
@@ -484,27 +478,27 @@ document.addEventListener('click',async e=>{const profile=document.querySelector
   top0();return;
  }
  if(d.help!==undefined){S.sheet={t:'help'};return renderP()}
- if(d.les){S.sheet={id:d.les,ans:null};renderP();if(d.listen!==undefined){speak(d.les);renderP()}return}
+ if(d.les){await api('/lessons/'+d.les+'/open',{});S.sheet={id:d.les,ans:null};renderP();if(d.listen!==undefined){speak(d.les);renderP()}return}
  if(d.speak){speak(d.speak);return renderP()}
  if(d.ans!==undefined){S.sheet.ans=+d.ans;S.sheet.checked=false;return renderP()}
  if(d.check!==undefined){const result=await api('/lessons/'+S.sheet.id+'/answer',{answer:S.sheet.ans});S.sheet.checked=true;S.sheet.pass=result.correct;
   if(result.correct){await sync();S.sheet=null;stopSpeak();toast(result.awarded?'Benar! +20 poin':'Materi sudah pernah selesai.');if(result.awarded)confetti()}return renderP()}
- if(d.complete){t.disabled=true;try{const result=await api('/lessons/'+d.complete+'/complete',{});await sync();S.sheet=null;stopSpeak();renderP();toast(result.awarded?'Materi selesai. +20 poin.':'Materi sudah pernah selesai.');}finally{t.disabled=false;}return;}
+ if(d.complete){t.disabled=true;try{const result=await api('/lessons/'+d.complete+'/complete',{});await sync();S.sheet=null;stopSpeak();renderP();toast(result.awarded?'Partisipasi belajar tersimpan. +'+result.awarded+' poin.':'Partisipasi belajar sudah tercatat.');}finally{t.disabled=false;}return;}
  if(d.close!==undefined){S.sheet=null;stopSpeak();return renderP()}
  if(d.rew){S.sheet={t:'rew',id:d.rew};return renderP()}
- if(d.redeem){if(S.sheet.busy)return;S.sheet.busy=true;try{const result=await api('/rewards/'+d.redeem+'/redeem',{clientId:S.sheet.clientId||(S.sheet.clientId=crypto.randomUUID())});await sync();S.sheet={t:'rew',id:d.redeem,code:result.voucher.code};renderP();confetti();}finally{if(S.sheet)S.sheet.busy=false;}return}
+ if(d.redeem){if(S.sheet.busy||S.sheet.code)return;S.sheet.busy=true;try{const result=await api('/rewards/'+d.redeem+'/redeem',{clientId:S.sheet.clientId||(S.sheet.clientId=crypto.randomUUID())});const user=U(S.me);if(!user.vouchers.some(v=>v.code===result.voucher.code))user.vouchers.push(result.voucher);S.sheet={t:'rew',id:d.redeem,code:result.voucher.code,voucher:result.voucher};renderP();confetti();try{await sync();renderP();}catch{toast('Kupon berhasil dibuat dan tersimpan. Pembaruan saldo tertunda.');}}finally{if(S.sheet)S.sheet.busy=false;}return}
  if(d.size){await api('/preferences',{big:d.size==='1'});await sync();return renderP()}
  if(d.biloc){S.biLoc=d.biloc;return renderB()}
  if(d.biweek){S.biWeek=+d.biweek;return renderB()}
  if(d.copysum!==undefined){const txt=biSummary();(navigator.clipboard?navigator.clipboard.writeText(txt):Promise.reject()).then(()=>toast('Ringkasan tersalin. Tempel di WhatsApp atau email.'),()=>{S.sheetTxt=txt;toast('Gagal menyalin otomatis. Blok teks ringkasan lalu salin manual.');const n=document.createElement('textarea');n.value=txt;n.style.cssText='width:100%;min-height:180px;margin-top:8px';$('#v-bi .phead .wrap').append(n);n.select()});return}
- if(d.atab){S.atab=d.atab;S.rej=null;if(d.atab==='kuis')S.quizAdmin=await api('/admin/quiz');if(d.atab==='komunitas'){S.groupDelete=null;S.memberGroup=null;await loadGroups();}if(d.atab==='belajar'){S.materialEdit=null;S.materialData=null;loadMaterials();}if(d.atab==='kegiatan'){S.activityEdit=null;S.activityData=null;loadActivities();}return renderA()}
+ if(d.atab){S.atab=d.atab;S.rej=null;if(d.atab==='kuis'){S.quizAdmin=await api('/admin/quiz');S.questionLibrary=(await api('/manage/questions')).options.questions;}if(d.atab==='komunitas'){S.groupDelete=null;S.memberGroup=null;await loadGroups();}if(d.atab==='belajar'){S.materialEdit=null;S.materialData=null;loadMaterials();}if(d.atab==='kegiatan'){S.activityEdit=null;S.activityData=null;loadActivities();}return renderA()}
  if(d.rej){S.rej=+d.rej;return renderA()}
  if(d.rejc!==undefined){S.rej=null;return renderA()}
  if(d.huser){S.help.uid=d.huser;return renderA()}
  if(d.htile){S.help.tile=d.htile;return renderA()}
  if(d.hsave!==undefined){const h=S.help;await api('/actions',{uid:h.uid,tile:h.tile,photo:h.photo,clientId:h.clientId||(h.clientId=crypto.randomUUID())});await sync();S.help={q:'',uid:null,tile:null,photo:null};toast('Aksi warga tersimpan.');return renderA()}
  if(d.articleSend){t.disabled=true;try{const result=await api('/articles/'+d.articleSend+'/send',{});await sync();toast(result.article.emailStatus==='sent'?'Email terkirim ke tim.':'Email belum terkirim. Silakan coba lagi.');render();}finally{t.disabled=false;}return;}
- if(d.articleOk){t.disabled=true;try{await api('/articles/'+d.articleOk+'/review',{status:'verified'});await sync();renderA();toast('Artikel disetujui. +50 poin untuk warga.');}finally{t.disabled=false;}return;}
+ if(d.articleOk){t.disabled=true;try{await api('/articles/'+d.articleOk+'/review',{status:'verified'});await sync();renderA();toast('Artikel disetujui. Poin warga diperbarui.');}finally{t.disabled=false;}return;}
  if(d.ok||d.no){await api('/actions/'+(d.ok||d.no)+'/review',{status:d.ok?'verified':'rejected',reason:d.no?$('#rej-'+d.no).value:''});await sync();S.rej=null;toast('Keputusan tersimpan.');return renderA()}
  } catch(error){toast(error.message);if(error.status===401){S.account=null;S.me=null;route();}}
 });
@@ -537,6 +531,8 @@ document.addEventListener('input',e=>{const id=e.target.id,v=e.target.value;
  if(id==='articleBody')S.articleDraft.body=v;if(id==='articleParticipants')S.articleDraft.participants=v;if(id==='articleDate')S.articleDraft.occurredOn=v;
  if(id==='q')ptab(v);if(id==='hq'){S.help.q=v;who()}});
 document.addEventListener('submit',async e=>{
+ if(e.target.matches('[data-own-article-archive]')){e.preventDefault();const form=e.target,button=form.querySelector('button');button.disabled=true;try{await api('/my/articles/'+form.dataset.ownArticleArchive,{operation:'archive',reason:new FormData(form).get('reason')});await sync();renderP();toast('Pengajuan diarsipkan.');}catch(error){toast(error.message);button.disabled=false;}return;}
+ if(e.target.id==='residentHistoryFilter'){e.preventDefault();const values=Object.fromEntries(new FormData(e.target));S.historyFrom=values.from;S.historyTo=values.to;S.historyStatus=values.status;S.historyPage=1;return loadResidentHistory();}
  if(e.target.id==='groupSearch'){e.preventDefault();S.groupQuery=new FormData(e.target).get('q');renderA();return;}
  if(e.target.id==='memberSearch'){e.preventDefault();S.memberQuery=new FormData(e.target).get('q');S.memberPage=1;return loadMembers();}
  if(['communityCreate','communityDelete'].includes(e.target.id)){e.preventDefault();const form=e.target,button=form.querySelector('[type=submit]'),box=form.querySelector('[data-group-error]');if(button.disabled)return;button.disabled=true;box.hidden=true;try{const values=Object.fromEntries(new FormData(form));if(form.id==='communityCreate'){if(values.type==='kelurahan')values.name=values.location;await api('/admin/communities',values);}else await api('/admin/communities/'+S.groupDelete.id+'/delete',values);S.groupDelete=null;await sync();await loadGroups();toast('Kelompok diperbarui.');}catch(error){box.hidden=false;box.textContent=error.message;button.disabled=false;}return;}
@@ -570,8 +566,8 @@ document.addEventListener('submit',async e=>{
   try{const data=Object.fromEntries(new FormData(form)),file=form.querySelector('#materialFile').files[0];if(file&&!form.dataset.fileId){const uploaded=await uploadMaterial(file);form.dataset.fileId=uploaded.id;}await api('/materials',{...data,fileId:form.dataset.fileId||'',clientId:form.dataset.clientId||(form.dataset.clientId=crypto.randomUUID())});await sync();await loadMaterials();renderA();toast('Materi diterbitkan untuk warga.');}catch(error){toast(error.message);button.disabled=false;button.textContent='Terbitkan materi';}return;
  }
  if(e.target.id==='articleForm'){
-  e.preventDefault();const draft=S.articleDraft;if(draft.busy)return;draft.busy=true;draft.err='';renderP();
-  try{const result=await api('/articles',{...draft,clientId:draft.clientId||(draft.clientId=crypto.randomUUID())});await sync();S.articleDraft={body:'',participants:'',occurredOn:'',photo:null,err:''};toast(result.article.emailStatus==='sent'?'Artikel terkirim ke tim untuk kurasi.':'Artikel tersimpan, email belum terkirim. Gunakan kirim ulang.');}catch(error){draft.err=error.message;}finally{draft.busy=false;renderP();}return;
+  e.preventDefault();const draft=S.articleDraft;if(draft.busy)return;draft.reason=$('#articleEditReason')?.value;draft.busy=true;draft.err='';renderP();
+  try{const result=await api(draft.editId?'/my/articles/'+draft.editId:'/articles',{...draft,clientId:draft.clientId||(draft.clientId=crypto.randomUUID())});await sync();S.articleDraft={body:'',participants:'',occurredOn:'',photo:null,err:''};toast(draft.editId?'Perubahan tersimpan. Kirim ulang email untuk kurasi.':result.article.emailStatus==='sent'?'Artikel terkirim ke tim untuk kurasi.':'Artikel tersimpan, email belum terkirim. Gunakan kirim ulang.');}catch(error){draft.err=error.message;}finally{draft.busy=false;renderP();}return;
  }
  if(e.target.matches('[data-article-review]')){e.preventDefault();const button=e.target.querySelector('button');button.disabled=true;try{await api('/articles/'+e.target.dataset.articleReview+'/review',{status:'rejected',reason:new FormData(e.target).get('reason')});await sync();renderA();toast('Hasil kurasi tersimpan.');}catch(error){toast(error.message);button.disabled=false;}return;}
  if(e.target.id==='authForm'){
@@ -595,6 +591,7 @@ document.addEventListener('submit',async e=>{
  try{await api('/transactions',{uid,mat:m,kg:k,clientId:crypto.randomUUID()});await sync();toast(`Setoran ${fmt(k)} kg tersimpan.`);renderA();}catch(error){toast(error.message);button.disabled=false;}
 });
 document.addEventListener('change',e=>{
+ if(e.target.matches('[data-bank-question]')){const q=S.questionLibrary.find(q=>q.id===e.target.value);if(!q)return;const field=e.target.closest('fieldset');field.querySelector('[name=text]').value=q.text;field.querySelector('[name=explanation]').value=q.explanation;field.querySelectorAll('[name=option]').forEach(input=>input.closest('label').remove());const answer=field.querySelector('[name=answer]');answer.closest('label').insertAdjacentHTML('beforebegin',q.options.map((o,i)=>`<label>Pilihan ${i+1}<input name="option" required maxlength="250" value="${esc(o)}"></label>`).join(''));answer.innerHTML=q.options.map((o,i)=>`<option value="${i}" ${q.answer===i?'selected':''}>Pilihan ${i+1}</option>`).join('');return;}
  if(e.target.matches('#profileForm [name=originType]')){e.target.form.querySelector('[name=communityId]').innerHTML=communityOptions(S.communityOptions||[],e.target.value);return;}
  if(e.target.id==='communityType'){const form=e.target.form,local=e.target.value==='kelurahan';form.querySelector('[data-group-location]').hidden=!local;form.querySelector('[name=location]').disabled=!local;form.querySelector('[data-group-name]').hidden=local;form.querySelector('[name=name]').disabled=local;form.querySelector('[name=name]').required=!local;return;}
  if(e.target.id==='locationFile'){const file=e.target.files[0];if(!file)return;if(file.size>150000){toast('Berkas maksimal 150 KB.');return;}file.text().then(text=>{if(S.accessTab!=='locations')return;S.locationDraft=text;renderSuperadmin();}).catch(()=>toast('Berkas tidak dapat dibaca.'));return;}

@@ -43,12 +43,13 @@ test('server enforces resident ownership, reviews, photograph access and BI read
   const own = (await f.call('/bootstrap', undefined, a.cookie)).body;assert.equal(own.users.length, 1);assert.equal(own.users[0].points, 2);assert.equal(own.acts.length, 1);
   assert.equal((await f.call('/preferences', { big: true, uid: b.body.account.id }, a.cookie)).status, 200);assert.equal((await f.call('/bootstrap', undefined, a.cookie)).body.users[0].big, true);
   const other = (await f.call('/bootstrap', undefined, b.cookie)).body;assert.equal(other.acts.length, 0);assert.equal(other.users[0].points, 0);
-  const report = (await f.call('/bootstrap', undefined, bi.cookie)).body;assert.equal(report.users.length, 2);assert.ok(report.users.every((u) => !u.email && u.name === 'Warga'));assert.equal(report.acts[0].photo, '');
+  const report = (await f.call('/bootstrap', undefined, bi.cookie)).body;assert.deepEqual(report.users,[]);assert.deepEqual(report.acts,[]);assert.equal(report.report.scopes[0].weeks.at(-1).V,1);assert.ok(!JSON.stringify(report.report).includes(a.body.account.id));
   assert.equal((await f.call('/reports/export', undefined, bi.cookie)).status, 200);assert.equal((await f.call('/reports/export', undefined, a.cookie)).status, 403);
 });
 test('points, quiz idempotency, stock, concurrent redemption and one-time fulfillment', async (t) => {
   const f = await fixture(t),r = await f.resident(),admin = await f.staff('admin'),uid = r.body.account.id;
   assert.equal((await f.call('/lessons/l1/answer', { answer: 0 }, r.cookie)).status,410);
+  assert.equal((await f.call('/lessons/l1/complete', {}, r.cookie)).status,409);await f.call('/lessons/l1/open',{},r.cookie);
   assert.equal((await f.call('/lessons/l1/complete', {}, r.cookie)).body.awarded, 20);
   assert.equal((await f.call('/lessons/l1/complete', {}, r.cookie)).body.awarded, 0);
   assert.equal((await f.call('/rewards/r2/redeem', { clientId: 'low' }, r.cookie)).status, 409);
@@ -77,7 +78,7 @@ test('email verification and password reset expire, cannot be replayed and revok
 test('community API aggregates all members without exposing resident identities', async (t) => {
   const f = await fixture(t),a = await f.resident(),b = await f.resident('member@example.test'),admin = await f.staff('admin');
   assert.equal((await f.call('/communities')).status, 401);
-  await f.call('/lessons/l1/complete', {}, a.cookie);
+  await f.call('/lessons/l1/open',{},a.cookie);await f.call('/lessons/l1/complete', {}, a.cookie);
   await f.call('/transactions', { uid: b.body.account.id, mat: 'Kertas', kg: 1, clientId: 'community-deposit' }, admin.cookie);
   const response = await f.call('/communities', undefined, a.cookie);assert.equal(response.status, 200);
   const own = response.body.communities.find((group) => group.l === 'Tlogomas'&&group.type==='komunitas');assert.equal(own.points, 50);assert.equal(own.members, 2);assert.equal(own.rank, 1);
@@ -122,7 +123,7 @@ test('team can publish all four learning formats; files are private and completi
   const f = await fixture(t),r = await f.resident(),admin = await f.staff('admin');
   const text = { title: 'Materi teks pengujian', kind: 'text', body: 'Materi tentang mengurangi sampah dan memilah sampah dari rumah.', clientId: 'manual' };
   assert.equal((await f.call('/materials', text, r.cookie)).status, 403);const material = (await f.call('/materials', text, admin.cookie)).body.material;
-  assert.equal((await f.call('/lessons/' + material.id + '/complete', {}, r.cookie)).body.awarded, 20);assert.equal((await f.call('/lessons/' + material.id + '/complete', {}, r.cookie)).body.awarded, 0);assert.equal((await f.call('/lessons/l1/complete', {}, r.cookie)).status, 200);
+  await f.call('/lessons/'+material.id+'/open',{},r.cookie);await f.call('/lessons/l1/open',{},r.cookie);assert.equal((await f.call('/lessons/' + material.id + '/complete', {}, r.cookie)).body.awarded, 20);assert.equal((await f.call('/lessons/' + material.id + '/complete', {}, r.cookie)).body.awarded, 0);assert.equal((await f.call('/lessons/l1/complete', {}, r.cookie)).status, 200);
   const video = await f.call('/materials', { title: 'Video pengujian', kind: 'video', videoUrl: 'https://youtu.be/abcdefghijk', clientId: 'video' }, admin.cookie);assert.equal(video.status, 201);assert.match(video.body.material.videoEmbed, /youtube-nocookie/);
   assert.equal((await f.call('/materials', { title: 'Video berbahaya', kind: 'video', videoUrl: 'javascript:alert(1)', clientId: 'bad-video' }, admin.cookie)).status, 400);
   for (const [name, content, kind] of [['modul.pdf', '%PDF-1.7\nPengujian materi PDF\n%%EOF', 'module'], ['presentasi.pptx', 'PK\x03\x04' + '0'.repeat(30), 'powerpoint'], ['video.mp4', '0000ftypisom' + '0'.repeat(30), 'video']]) {
@@ -173,7 +174,7 @@ test('profile is mandatory after verification; validates origin and protects new
  assert.equal((await f.call('/profile',{name:'Nama Baru',originType:'komunitas',originName:'Hijau',whatsapp:'abc',district:'Lowokwaru',city:'Malang'},resident.cookie)).status,400);
  assert.equal((await f.call('/profile',{name:'Nama Baru',originType:'instansi',originName:'SMA Pengujian',whatsapp:'+6281234567890',district:'Lowokwaru',city:'Kota Malang'},resident.cookie)).status,200);
  const data=(await f.call('/bootstrap',undefined,resident.cookie)).body;assert.equal(data.profileRequired,false);assert.equal(data.account.name,'Nama Baru');assert.equal(data.users[0].profile.originType,'instansi');
- const report=(await f.call('/bootstrap',undefined,bi.cookie)).body;assert.equal(report.users[0].profile,undefined);assert.equal(report.users[0].phone,'');
+ const report=(await f.call('/bootstrap',undefined,bi.cookie)).body;assert.deepEqual(report.users,[]);assert.ok(!JSON.stringify(report.report).includes('+6281234567890'));
 });
 test('weekly quiz persists ten single answers, hides keys, locks editing and resets Sunday in Jakarta',async t=>{
  let clock=new Date('2026-11-28T16:59:59Z');const f=await fixture(t,{now:()=>clock}),resident=await f.resident(),admin=await f.staff('admin');
@@ -319,7 +320,7 @@ test('deleting an account revokes access, anonymizes profile and preserves activ
 test('material archive/restore and permanent delete preserve earned points and block stale completion',async t=>{
  const f=await fixture(t),admin=await f.staff('admin'),root=await f.staff('superadmin'),resident=await f.resident(),body={title:'Materi daur ulang',kind:'text',body:'Pelajari cara memilah sampah agar dapat didaur ulang.',clientId:'manage-text'};
  const lesson=(await f.call('/materials',body,admin.cookie)).body.material;
- assert.equal((await f.call('/lessons/'+lesson.id+'/complete',{},resident.cookie)).body.awarded,20);
+ await f.call('/lessons/'+lesson.id+'/open',{},resident.cookie);assert.equal((await f.call('/lessons/'+lesson.id+'/complete',{},resident.cookie)).body.awarded,20);
  assert.equal((await f.call('/materials/'+lesson.id+'/archive',{reason:'Materi ditinjau ulang'},resident.cookie)).status,403);
  assert.equal((await f.call('/materials/'+lesson.id+'/archive',{reason:'Materi ditinjau ulang'},admin.cookie)).status,200);
  assert.ok(!(await f.call('/bootstrap',undefined,resident.cookie)).body.lessons.some(item=>item.id===lesson.id));assert.equal((await f.call('/bootstrap',undefined,resident.cookie)).body.users[0].points,20);
@@ -364,4 +365,89 @@ test('staff controls group catalog; citizen chooses a managed origin and member 
  assert.equal((await f.call('/admin/communities/'+group.id+'/delete',{reason:'Kelompok digabung',confirmation:'HAPUS',targetId:target.id},admin.cookie)).status,200);
  assert.equal((await f.call('/communities/'+group.id+'/members',undefined,resident.cookie)).status,404);assert.equal((await f.call('/profile',profile,resident.cookie)).status,400);const user=(await f.call('/bootstrap',undefined,resident.cookie)).body.users[0];assert.equal(user.communityId,target.id);assert.equal(user.profile.originType,'kelurahan');
  assert.equal((await f.call('/communities/'+target.id+'/members',undefined,bi.cookie)).status,403);
+});
+
+test('management CRUD guards roles, retains voucher snapshots and cancels deposits exactly once',async t=>{
+ const f=await fixture(t),r=await f.resident(),a=await f.staff('admin'),root=await f.staff('superadmin'),uid=r.body.account.id;
+ const edit=(kind,id,body,cookie=a.cookie)=>f.call('/manage/'+kind+'/'+encodeURIComponent(id),{reason:'Koreksi data pengujian',...body},cookie);
+ assert.equal((await edit('rewards','new',{n:'Hadiah tes',p:10,stock:2},r.cookie)).status,403);
+ assert.equal((await edit('point-rules','rules',{learning:5,article:45,transaction:7})).status,403);
+ const reward=(await edit('rewards','new',{n:'Hadiah tes',p:10,stock:2})).body.row;assert.ok(reward.id);
+ await f.call('/transactions',{uid,mat:'Kertas',kg:2,clientId:'crud-deposit'},a.cookie);
+ const voucher=(await f.call('/rewards/'+reward.id+'/redeem',{clientId:'crud-voucher'},r.cookie)).body.voucher;
+ assert.equal(voucher.n,'Hadiah tes');assert.equal(voucher.p,10);
+ assert.equal((await edit('rewards',reward.id,{n:'Hadiah diganti',p:25,stock:1})).status,200);
+ assert.equal((await f.call('/bootstrap',undefined,r.cookie)).body.users[0].vouchers[0].n,'Hadiah tes');
+ assert.equal((await edit('rewards',reward.id,{operation:'archive'})).status,200);
+ assert.equal((await f.call('/rewards/'+reward.id+'/redeem',{clientId:'blocked-disabled'},r.cookie)).status,409);
+ const deposit=(await f.read()).trx[0];assert.equal((await edit('transactions',deposit.id,{mat:'Plastik',kg:3})).status,200);
+ assert.equal((await edit('transactions',deposit.id,{operation:'cancel'})).body.pointsDelta,-30);
+ assert.equal((await edit('transactions',deposit.id,{operation:'cancel'})).body.pointsDelta,0);
+ const boot=(await f.call('/bootstrap',undefined,r.cookie)).body;assert.equal(boot.users[0].balance,-10);assert.equal(boot.trx.length,0);assert.equal(boot.users[0].vouchers.length,1);
+ assert.equal((await edit('point-rules','rules',{learning:5,article:45,transaction:7},root.cookie)).status,200);
+ await f.call('/lessons/l1/open',{},r.cookie);assert.equal((await f.call('/lessons/l1/complete',{},r.cookie)).body.awarded,5);
+ assert.equal((await edit('point-rules','rules',{learning:99,article:45,transaction:7},root.cookie)).status,200);assert.equal((await f.call('/bootstrap',undefined,r.cookie)).body.users[0].points,5);
+ const audit=(await f.call('/manage/transactions?history=true',undefined,a.cookie)).body;assert.equal(audit.total,3);assert.equal(audit.rows[0].reason,'Koreksi data pengujian');
+});
+
+test('management edits preserve historical community while updating profiles, bank and content',async t=>{
+ const f=await fixture(t),r=await f.resident(),a=await f.staff('admin'),root=await f.staff('superadmin');
+ const edit=(kind,id,body,cookie=a.cookie)=>f.call('/manage/'+kind+'/'+encodeURIComponent(id),{reason:'Pengelolaan konten uji',...body},cookie);
+ const action=(await f.call('/actions',{tile:'tas',photo,clientId:'origin-snapshot'},r.cookie)).body.action;await f.call('/actions/'+action.id+'/review',{status:'verified'},a.cookie);
+ const s=await f.read(),g=s.communities.find(g=>g.type==='komunitas'),target=s.communities.find(g=>g.type==='instansi');
+ assert.equal((await edit('communities',g.id,{name:'Kelompok baru',type:'event'})).status,200);
+ assert.equal((await f.call('/public/overview')).body.feed[0].community,'Tlogomas');
+ assert.equal((await edit('residents',r.body.account.id,{name:'Nama diedit',loc:'Dinoyo',communityId:target.id,whatsapp:'081234567899',district:'Lowokwaru',city:'Malang'})).status,200);
+ assert.equal((await f.call('/my/activities',undefined,r.cookie)).body.rows[0].origin.communityId,g.id);
+ assert.equal((await edit('actions',action.id,{tile:'jalan',date:action.date})).body.pointsDelta,-2);assert.equal((await f.call('/public/activity-photos/'+action.id)).status,404);
+ const q=(await edit('questions','new',{text:'Soal baru lingkungan?',options:['Pilihan satu','Pilihan dua'],answer:1,explanation:'Penjelasan benar'})).body.row;assert.ok(q.id);assert.equal((await edit('questions',q.id,{operation:'delete',confirmation:'HAPUS'})).status,200);
+ assert.equal((await edit('materials','l1',{title:'Judul diperbaiki',kind:'text',body:'Isi pembelajaran baru yang sudah diperiksa oleh pengelola.'})).status,200);
+ assert.equal((await edit('headlines','hero',{title:'Headline terbaru',body:'Cerita kegiatan masyarakat untuk lingkungan.',image:'/brand/ilitterless-symbol.png'},root.cookie)).status,200);assert.equal((await f.call('/public/overview')).body.headlines[0].title,'Headline terbaru');
+ assert.equal((await edit('action-types','new',{n:'Kompos rumah',hint:'Foto kegiatan kompos di rumah.',cat:'waste',points:11})).status,400);
+ const tile=(await edit('action-types','new',{n:'Kompos rumah',hint:'Foto kegiatan kompos di rumah.',cat:'waste',points:8})).body.row;assert.equal((await f.call('/actions',{tile:tile.id,photo,clientId:'custom-tile'},r.cookie)).status,201);
+ assert.equal((await edit('locations','Mojolangu',{name:'Mojolangu Baru'},root.cookie)).status,200);
+ assert.equal((await edit('locations','Tlogomas',{operation:'delete',confirmation:'HAPUS'},root.cookie)).status,409);
+ const invite=await edit('accounts','new',{name:'Petugas Baru',email:'undangan@example.test',loc:'Dinoyo',role:'admin'},root.cookie);assert.equal(invite.status,200);assert.ok(f.messages.at(-1).text.includes('token='));assert.ok(!JSON.stringify(invite.body).includes('password_hash'));
+ const token=new URL(f.messages.at(-1).text.match(/https?:\/\/\S+/)[0]).searchParams.get('token');assert.equal((await f.call('/auth/reset',{token,password:secret})).status,200);const login=await f.call('/auth/login',{email:'undangan@example.test',password:secret});assert.ok(login.body.account.roles.includes('admin'));
+});
+
+test('resident pagination and BI responses never expose individual action or rejection details',async t=>{
+ const f=await fixture(t),r=await f.resident(),b=await f.resident('two@example.test'),bi=await f.staff('bi');const s=await f.read();s.acts=Array.from({length:25},(_,i)=>({id:i+1,uid:r.body.account.id,tile:'tas',act:'Pakai tas kain',week:1,date:'2026-11-26',status:i%2?'verified':'rejected',reason:'INTERNAL-REJECTION-SECRET',src:'app'}));s.acts.push({id:99,uid:b.body.account.id,date:'2026-11-26',week:1,status:'pending'});await f.write(s);
+ const first=(await f.call('/my/activities?page=1',undefined,r.cookie)).body;assert.equal(first.total,25);assert.equal(first.rows.length,12);assert.equal(first.pages,3);
+ const last=(await f.call('/my/activities?page=3&from=2026-11-26&to=2026-11-26',undefined,r.cookie)).body;assert.equal(last.rows.length,1);
+ assert.equal((await f.call('/my/activities?status=verified',undefined,r.cookie)).body.total,12);
+ const report=(await f.call('/bootstrap',undefined,bi.cookie)).body;for(const secret of ['INTERNAL-REJECTION-SECRET',r.body.account.id,b.body.account.id,'BIBU-','warga@example.test'])assert.ok(!JSON.stringify(report).includes(secret));assert.equal(report.report.scopes[0].weeks.at(-1).V,12);assert.deepEqual(report.trx,[]);
+});
+
+test('article owner can revise or withdraw unapproved submissions but cannot edit approved work or another owner',async t=>{
+ const f=await fixture(t),a=await f.resident(),b=await f.resident('other-author@example.test'),staff=await f.staff('admin');
+ const draft={body:'Kegiatan warga memilah sampah bersama supaya lingkungan bersih dan material dapat dikumpulkan kembali.',participants:'Warga uji',occurredOn:'2026-01-10',photo,clientId:'revise-owner'};
+ const article=(await f.call('/articles',draft,a.cookie)).body.article;
+ const changes={...draft,body:draft.body+' Tulisan diperbaiki.',reason:'Memperbaiki uraian kegiatan'};
+ assert.equal((await f.call('/my/articles/'+article.id,changes,b.cookie)).status,404);
+ assert.equal((await f.call('/my/articles/'+article.id,changes,a.cookie)).status,200);
+ assert.equal((await f.call('/articles/'+article.id+'/review',{status:'verified'},staff.cookie)).status,409);
+ assert.equal((await f.call('/articles/'+article.id+'/send',{},a.cookie)).body.article.emailStatus,'sent');
+ assert.equal((await f.call('/articles/'+article.id+'/review',{status:'verified'},staff.cookie)).status,200);
+ assert.equal((await f.call('/my/articles/'+article.id,changes,a.cookie)).status,409);
+ assert.equal((await f.call('/manage/articles/'+article.id,{operation:'archive',reason:'Pengajuan dibatalkan petugas'},staff.cookie)).body.pointsDelta,-50);
+ assert.equal((await f.call('/articles/'+article.id+'/send',{},a.cookie)).status,404);
+ const second=(await f.call('/articles',{...draft,clientId:'withdraw-owner'},a.cookie)).body.article;
+ assert.equal((await f.call('/my/articles/'+second.id,{operation:'archive',reason:'Menarik pengajuan ganda'},a.cookie)).status,200);
+ assert.ok(!(await f.call('/bootstrap',undefined,a.cookie)).body.articles.some(row=>row.id===second.id));
+});
+
+test('assisted profile removal and unused location deletion require Super Admin and typed confirmation',async t=>{
+ const f=await fixture(t),staff=await f.staff('admin'),root=await f.staff('superadmin');
+ const profile=(await f.call('/residents',{name:'Warga tanpa akun',loc:'Tlogomas'},staff.cookie)).body.user;
+ const endpoint='/manage/residents/'+profile.id,body={operation:'delete',reason:'Profil bantuan terdaftar ganda',confirmation:'HAPUS'};
+ assert.equal((await f.call(endpoint,body,staff.cookie)).status,403);
+ assert.equal((await f.call(endpoint,{...body,operation:'archive'},root.cookie)).status,400);
+ assert.equal((await f.call(endpoint,{...body,confirmation:''},root.cookie)).status,400);
+ assert.equal((await f.call(endpoint,body,root.cookie)).status,200);assert.ok((await f.read()).users.find(u=>u.id===profile.id).deletedAt);
+ await f.call('/super-admin/locations/import',{text:'Kelurahan Tanpa Referensi'},root.cookie);
+ const location='/manage/locations/'+encodeURIComponent('Kelurahan Tanpa Referensi');
+ assert.equal((await f.call(location,{operation:'restore',reason:'Tindakan salah uji'},root.cookie)).status,400);
+ assert.equal((await f.call(location,{operation:'delete',reason:'Kelurahan uji tidak digunakan',confirmation:'HAPUS'},root.cookie)).status,200);
+ assert.ok(!(await f.call('/locations')).body.locations.some(l=>l.name==='Kelurahan Tanpa Referensi'));
 });

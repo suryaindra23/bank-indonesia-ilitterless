@@ -23,12 +23,13 @@ export function completedMissions(state, uid) {
  return [...new Set(verified.map(a=>a.week))].flatMap(week=>MIS.filter(m=>new Set(verified.filter(a=>a.week===week&&a.tile===m.tile).map(a=>a.date)).size>=m.target).map(m=>({key:uid+':'+week+':'+m.id,week})));
 }
 export function dailyAward(state, action) {
- return state.acts.some(a=>a.id!==action.id&&a.uid===action.uid&&a.tile===action.tile&&a.date===action.date&&a.status==='verified')?0:DAILY_POINTS[action.tile]||0;
+ return state.acts.some(a=>a.id!==action.id&&a.uid===action.uid&&a.tile===action.tile&&a.date===action.date&&a.status==='verified')?0:(action.pointValue??state.actionTypes?.find(t=>t.id===action.tile)?.points??DAILY_POINTS[action.tile]??0);
 }
 export function points(state, uid) {
  const verified=state.acts.filter(a=>a.uid===uid&&a.status==='verified');
  const dates=new Set();
  const actionPoints=verified.reduce((sum,a)=>{const key=a.tile+':'+a.date;const award=a.awardedPoints??(dates.has(key)?0:DAILY_POINTS[a.tile]||0);dates.add(key);return sum+award;},0);
  const missions=state.missionPolicyVersion===2?(state.frozenMissionPoints?.[uid]||0):completedMissions(state,uid).reduce((sum,m)=>sum+(state.legacyMissionKeys?.includes(m.key)?100:MISSION_POINTS),0);
- return (state.quizAttempts||[]).filter(a=>a.uid===uid).reduce((sum,a)=>sum+a.score,0)+actionPoints+state.trx.filter(t=>t.uid===uid).length*30+(state.users.find(u=>u.id===uid)?.ls.length||0)*20+missions+(state.articles||[]).filter(a=>a.uid===uid&&a.status==='verified').length*ARTICLE_POINTS;
+ const user=state.users.find(u=>u.id===uid);
+ return (state.quizAttempts||[]).filter(a=>a.uid===uid).reduce((sum,a)=>sum+a.score,0)+actionPoints+state.trx.filter(t=>t.uid===uid&&!t.cancelledAt).reduce((s,t)=>s+(t.awardedPoints??30),0)+(user?.ls||[]).reduce((s,id)=>s+(user?.learningAwards?.[id]??20),0)+missions+(state.articles||[]).filter(a=>a.uid===uid&&a.status==='verified'&&!a.archived).reduce((s,a)=>s+(a.awardedPoints??ARTICLE_POINTS),0);
 }

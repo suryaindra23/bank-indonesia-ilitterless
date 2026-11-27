@@ -20,6 +20,9 @@ import {initializeCommunities,mountCommunities} from './communities.js';
 import { createMailer } from './mail.js';
 import { communityStandings } from '../shared/community.js';
 import { co2e } from '../shared/carbon.js';
+import {aggregateReport} from './reports.js';
+import {initializeManagement,mountManagement} from './management.js';
+import {originSnapshot} from '../shared/history.js';
 const scrypt = promisify(scryptCallback);
 const digest = (value) => createHash('sha256').update(value).digest('hex');
 const fail = (status, message) => {throw Object.assign(new Error(message), { status });};
@@ -82,6 +85,7 @@ export async function createApp({ dataDir = path.resolve('data'), dbPath, limit 
   if((await read()).rewards.some(reward=>reward.n==='Tumbler KOBI'))await transaction('system','brand.cobi.catalog',state=>{for(const reward of state.rewards)if(reward.n==='Tumbler KOBI')reward.n='Tumbler COBI';});
   const pilotStart = process.env.PILOT_START || (await read()).pilotStart || '2026-11-09';
   await initializeCommunities({read,transaction});
+  await initializeManagement({read,transaction});
   if (!/^\d{4}-\d{2}-\d{2}$/.test(pilotStart) || !Number.isFinite(Date.parse(pilotStart))) throw Error('PILOT_START harus YYYY-MM-DD');
   const date = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
   const week = () => Math.max(1, Math.floor((Date.parse(date()) - Date.parse(pilotStart)) / 604800000) + 1);
@@ -179,14 +183,15 @@ export async function createApp({ dataDir = path.resolve('data'), dbPath, limit 
   });
   async function bootstrap(account) {
     if(account.role==='superadmin')return {account:publicAccount(account),locations:locationNames(await read(),true),users:[],acts:[],articles:[],lessons:[],trx:[],rewards:[],community:[],week:week(),pilotStart};
-    const state = await read();const scoped = account.role === 'peserta';const uid = account.id;
-    const acts = state.acts.filter((a) => (!scoped || a.uid === uid)&&(account.role!=='bi'||a.status!=='cancelled'));
+    const state = await read();
+    if(account.role==='bi')return {account:publicAccount(account),report:aggregateReport(state,week()),locations:locationNames(state,true),reportLocations:locationNames(state),week:week(),pilotStart,users:[],acts:[],trx:[],articles:[],lessons:[],rewards:[],community:[]};
+    const scoped = account.role === 'peserta';const uid = account.id;
+    const acts = state.acts.filter((a) => !scoped || a.uid === uid);
     const users = state.users.filter((u) => !scoped || u.id === uid).map((u) => ({ ...u, points: points(state, u.id), balance: points(state, u.id) - u.spent, prev: 0, wa: [] }));
     for (const u of users) u.prev = completedMissions(state, u.id).filter((m) => m.week !== week()).length;
-    if (account.role === 'bi') for (const u of users) {u.name = 'Warga';delete u.email;delete u.profile;u.phone='';u.notes = [];u.vouchers = [];}
     const community = communityStandings(state);
-    const articles = (state.articles || []).filter((a) => !scoped || a.uid === uid).map((a) => account.role === 'bi' ? { id: a.id, uid: a.uid, status: a.status, week: a.week } : a);
-    return { account: publicAccount(account), locations:locationNames(state,true),reportLocations:locationNames(state),users, acts: acts.map((a) => account.role === 'bi' ? { ...a, photo: '', reviewedBy: undefined } : a), articles, lessons: state.lessons.filter(lesson=>!lesson.archived||['admin','superadmin'].includes(account.role)).map(({q,...lesson})=>({...lesson,q:null})), profileRequired:scoped&&!profileComplete(state.users.find(user=>user.id===uid)), feed:publicOverview(state).feed, trx: state.trx.filter((t) => !scoped || t.uid === uid), rewards: state.rewards, community, week: week(),pilotStart, curationEmail: process.env.CURATION_EMAIL || 'ilitterless@gmail.com' };
+    const articles = (state.articles || []).filter((a) => !scoped || a.uid === uid);
+    return { account: publicAccount(account), actionTypes:state.actionTypes.filter(t=>!t.deletedAt),pointRules:state.pointRules,locations:locationNames(state,true),reportLocations:locationNames(state),users, acts, articles:articles.filter(a=>!a.archived), lessons: state.lessons.filter(lesson=>!lesson.archived||['admin','superadmin'].includes(account.role)).map(({q,...lesson})=>({...lesson,q:null})), profileRequired:scoped&&!profileComplete(state.users.find(user=>user.id===uid)), feed:publicOverview(state).feed, trx: state.trx.filter((t) => !t.cancelledAt&&(!scoped || t.uid === uid)), rewards: state.rewards.filter(r=>!r.deletedAt&&(!scoped||r.active!==false)), community, week: week(),pilotStart, curationEmail: process.env.CURATION_EMAIL || 'ilitterless@gmail.com' };
   }
   app.get('/api/bootstrap', requireRole(), async (req, res) => res.json(await bootstrap(req.account)));
   app.get('/api/communities', requireRole(), async (_req, res) => res.json({ communities: communityStandings(await read()) }));
@@ -222,13 +227,14 @@ export async function createApp({ dataDir = path.resolve('data'), dbPath, limit 
   mountMaterials(app, { read, transaction, requireRole, dataDir, storage });
   mountMaterialManagement(app,{db,read,transaction,requireRole,rolesFor,storage});
   mountUploads(app,{storage,read,transaction,requireRole});
+  mountManagement(app,{read,transaction,db,requireRole,rolesFor,passwordHash,sendToken,savePhoto,now});
   app.get('/api/photos/:name', requireRole('peserta', 'admin','superadmin'), async (req, res) => {
     const state = await read(),photo = '/api/photos/' + req.params.name;
     if (!/^[a-f0-9-]+\.(jpeg|png|webp)$/.test(req.params.name) || ![...state.acts, ...(state.articles || [])].some((a) => a.photo === photo && (req.account.roles.includes('admin') || req.account.roles.includes('superadmin') || a.uid === req.account.id))) fail(404, 'Foto tidak ditemukan.');
     await storage.serve(res,'photos/'+req.params.name);
   });
   app.post('/api/actions', requireRole('peserta', 'admin'), async (req, res) => {
-    const tile = TILES.find((t) => t.id === req.body.tile),uid = req.account.role === 'admin' ? text(req.body.uid) : req.account.id,clientId = text(req.body.clientId, 80);
+    const tile = (await read()).actionTypes.find((t) => t.id === req.body.tile&&t.active!==false&&!t.deletedAt),uid = req.account.role === 'admin' ? text(req.body.uid) : req.account.id,clientId = text(req.body.clientId, 80);
     if (!tile || !uid || !clientId) fail(400, 'Pilih warga dan jenis aksi.');
     const initial=await read();if(initial.deletedActionKeys?.includes(activityKey(uid,clientId)))fail(410,'Kegiatan ini telah dihapus pengelola. Buat laporan baru bila diperlukan.');
     const old = initial.acts.find((a) => a.uid === uid && a.clientId === clientId);if (old) return res.json({ action: old });
@@ -240,6 +246,7 @@ export async function createApp({ dataDir = path.resolve('data'), dbPath, limit 
         const duplicate = state.acts.find((a) => a.uid === uid && a.clientId === clientId);if (duplicate) return duplicate;
         const id=state.acts.reduce((max,item)=>Math.max(max,Number(item.id)+1),state.nextActionId||1);state.nextActionId=id+1;
         const action = { id, clientId, uid, tile: tile.id, cat: tile.cat, act: tile.n, week: week(), day: ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'][new Date(date() + 'T00:00:00Z').getUTCDay()], date: date(), photo, status: req.account.role === 'admin' ? 'verified' : 'pending', src: req.account.role === 'admin' ? 'petugas' : 'app', mission: null };
+        const currentTile=state.actionTypes.find(t=>t.id===tile.id&&t.active!==false&&!t.deletedAt);if(!currentTile)fail(409,'Jenis aksi tidak lagi aktif.');action.pointValue=currentTile.points;action.origin=originSnapshot(state,uid);
         if (action.status === 'verified') action.awardedPoints = dailyAward(state, action);
         state.acts.push(action);if (action.status === 'verified') notify(state, uid, `Petugas mencatat aksi "${tile.n}". +${action.awardedPoints} poin`);return action;
       });res.status(201).json({ action });} catch (error) {if (photo&&!req.body.photo?.startsWith('/api/photos/')) await storage.remove('photos/'+path.basename(photo));throw error;}
@@ -257,14 +264,14 @@ export async function createApp({ dataDir = path.resolve('data'), dbPath, limit 
   app.post('/api/transactions', requireRole('admin'), async (req, res) => {
     const uid = text(req.body.uid),mat = text(req.body.mat),kg = Number(req.body.kg),clientId = text(req.body.clientId, 80);
     if (!['Plastik', 'Kertas', 'Logam', 'Kaca'].includes(mat) || !Number.isFinite(kg) || kg < .1 || kg > 100 || !clientId) fail(400, 'Pilih material dan berat 0,1–100 kg.');
-    await transaction(req.account.id, 'transaction.create', (state) => {if (!state.users.some((u) => u.id === uid&&!u.deletedAt)) fail(404, 'Warga tidak ditemukan atau akunnya sudah dihapus.');if (state.trx.some((t) => t.clientId === clientId)) return;state.trx.push({ id: randomUUID(), uid, mat, kg: Math.round(kg * 10) / 10, week: week(), date: date(), clientId });notify(state, uid, `Setoran ${mat} ${kg} kg tercatat. +30 poin. Emisi dihindari ±${(Math.round(co2e(mat, kg) * 10) / 10).toString().replace('.', ',')} kg CO₂e`);});res.status(201).json({ ok: true });
+    await transaction(req.account.id, 'transaction.create', (state) => {if (!state.users.some((u) => u.id === uid&&!u.deletedAt)) fail(404, 'Warga tidak ditemukan atau akunnya sudah dihapus.');if (state.trx.some((t) => t.clientId === clientId)) return;state.trx.push({ id: randomUUID(), uid, mat, kg: Math.round(kg * 10) / 10, week: week(), date: date(), clientId,origin:originSnapshot(state,uid),awardedPoints:state.pointRules.transaction });notify(state, uid, `Setoran ${mat} ${kg} kg tercatat. +${state.pointRules.transaction} poin. Emisi dihindari ±${(Math.round(co2e(mat, kg) * 10) / 10).toString().replace('.', ',')} kg CO₂e`);});res.status(201).json({ ok: true });
   });
   app.post('/api/rewards/:id/redeem', requireRole('peserta'), async (req, res) => {
     const clientId = text(req.body.clientId, 80);if (!clientId) fail(400, 'Permintaan tidak valid.');
     const voucher = await transaction(req.account.id, 'reward.redeem', (state) => {
       const user = state.users.find((u) => u.id === req.account.id),old = user.vouchers.find((v) => v.clientId === clientId);if (old) return old;
-      const reward = state.rewards.find((r) => r.id === req.params.id);if (!reward || reward.stock < 1) fail(409, 'Hadiah sedang tidak tersedia.');if (points(state, user.id) - user.spent < reward.p) fail(409, 'Poin belum cukup.');
-      user.spent += reward.p;reward.stock--;const voucher = { n: reward.n, code: 'BBB-' + randomBytes(8).toString('hex').toUpperCase(), rewardId: reward.id, clientId, redeemed: false, created: new Date().toISOString() };user.vouchers.push(voucher);return voucher;
+      const reward = state.rewards.find((r) => r.id === req.params.id&&!r.deletedAt&&r.active!==false);if (!reward || reward.stock < 1) fail(409, 'Hadiah sedang tidak tersedia.');if (points(state, user.id) - user.spent < reward.p) fail(409, 'Poin belum cukup.');
+      user.spent += reward.p;reward.stock--;const voucher = { n: reward.n,p:reward.p, code: 'BBB-' + randomBytes(8).toString('hex').toUpperCase(), rewardId: reward.id, clientId, redeemed: false, created: new Date().toISOString() };user.vouchers.push(voucher);return voucher;
     });res.status(201).json({ voucher });
   });
   app.post('/api/rewards/:id/stock', requireRole('admin'), async (req, res) => {
@@ -274,7 +281,7 @@ export async function createApp({ dataDir = path.resolve('data'), dbPath, limit 
     const code = text(req.body.code, 40).toUpperCase();await transaction(req.account.id, 'voucher.fulfill', (state) => {const voucher = state.users.flatMap((u) => u.vouchers).find((v) => v.code === code);if (!voucher) fail(404, 'Kupon tidak ditemukan.');if (voucher.redeemed) fail(409, 'Kupon sudah digunakan.');voucher.redeemed = true;voucher.fulfilledBy = req.account.id;voucher.fulfilledAt = new Date().toISOString();});res.json({ ok: true });
   });
   app.get('/api/reports/export', requireRole('admin', 'bi'), async (req, res) => {
-    const state = await read();const safe = (v) => '"' + String(v).replaceAll('"', '""') + '"';
+    const state = await read();state.trx=state.trx.filter(t=>!t.cancelledAt);const safe = (v) => '"' + String(v).replaceAll('"', '""') + '"';
     const rows = [['Kelurahan', 'Warga', 'Aksi disetujui', 'Aksi menunggu', 'Setoran kg', 'Emisi dihindari kg CO2e (EPA WARM v16)'], ...locationNames(state).map((loc) => {const ids = new Set(state.users.filter((u) => u.loc === loc).map((u) => u.id)),T = state.trx.filter((t) => ids.has(t.uid));return [loc, ids.size, state.acts.filter((a) => ids.has(a.uid) && a.status === 'verified').length, state.acts.filter((a) => ids.has(a.uid) && a.status === 'pending').length, T.reduce((s, t) => s + t.kg, 0).toFixed(1), T.reduce((s, t) => s + co2e(t.mat, t.kg), 0).toFixed(1)];})];
     res.attachment('cobi-laporan.csv').type('text/csv').send('\uFEFF' + rows.map((r) => r.map(safe).join(',')).join('\r\n'));
   });
