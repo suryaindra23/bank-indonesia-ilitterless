@@ -1,5 +1,6 @@
 new MutationObserver(()=>{for(const c of document.querySelectorAll('.stack td:not([data-l])')){let i=0,p=c;while(p=p.previousElementSibling)i+=p.colSpan;c.dataset.l=c.closest('table').rows[0].cells[i]?.textContent||''}}).observe(document,{childList:true,subtree:true})
 import QRCode from 'qrcode';
+import {communityManagementUI,membersUI,communityOptions,communityTypeLabels} from './community-management-ui.js';
 import {materialManagementUI} from './material-management-ui.js';
 import {accessPage} from './access-ui.js';
 import {locationsUI} from './admin-management-ui.js';
@@ -95,7 +96,7 @@ const S={role:'peserta',account:null,community:[],me:null,auth:'email',tab:'home
 S.residentFilters=emptyResidentFilters();
 S.articles=[];S.articleDraft={body:'',participants:'',occurredOn:'',photo:null,err:''};
 async function sync(){
- const data=await api('/bootstrap');S.account=data.account;S.me=data.account.role==='peserta'?data.account.id:null;
+ const data=await api('/bootstrap');S.communityOptions=(await api('/community-options')).communities;S.account=data.account;S.me=data.account.role==='peserta'?data.account.id:null;
  if(data.locations)LOCS=data.locations;if(data.reportLocations)REPORT_LOCS=data.reportLocations;
  const presentation=new Map(users.map(u=>[u.id,{shown:u.shown,lastStg:u.lastStg}]));
  users.splice(0,users.length,...data.users.map(u=>({...u,...presentation.get(u.id),ls:new Set(u.ls)})));
@@ -159,7 +160,7 @@ function articleCard(article,admin=false){
  ${article.reason?`<p class="err">${esc(article.reason)}</p>`:''}
  ${admin&&article.status==='pending'?`<button class="btn n" data-article-ok="${article.id}" ${article.emailStatus==='sent'?'':'disabled'}>Setujui artikel · +${ARTICLE_POINTS} poin</button><form data-article-review="${article.id}" class="article-form"><label>Alasan penolakan<textarea name="reason" required maxlength="500" rows="2"></textarea></label><button class="btn rd" type="submit">Tolak dengan alasan</button></form>`:''}</article>`;
 }
-function communityRankingList(groups,ownName){const format=value=>new Intl.NumberFormat('id-ID').format(value);return `<ol class="community-standings">${groups.map(group=>`<li class="community-standing ${group.l.toLowerCase()===ownName.toLowerCase()?'is-own':''}" data-community="${esc(group.l)}"><span class="community-rank" aria-label="${group.rank?'Peringkat '+group.rank:'Belum berperingkat'}">${group.rank||'·'}</span><div><h3>${esc(group.l)}</h3>${group.l.toLowerCase()===ownName.toLowerCase()?'<span class="community-own-label">Komunitas Anda</span>':''}<p class="s">${group.members} anggota · ${group.verified} aksi disetujui</p></div><div class="community-points"><strong>${format(group.points)}</strong><span class="s">poin</span></div></li>`).join('')}</ol>`;}
+function communityRankingList(groups,ownName){const format=value=>new Intl.NumberFormat('id-ID').format(value);return `<ol class="community-standings">${groups.map(group=>`<li class="community-standing ${(group.id===ownName||group.l.toLowerCase()===ownName.toLowerCase())?'is-own':''}" data-community="${esc(group.l)}"><span class="community-rank" aria-label="${group.rank?'Peringkat '+group.rank:'Belum berperingkat'}">${group.rank||'·'}</span><div><h3>${esc(group.l)}</h3><p class="s">${communityTypeLabels[group.type]||'Komunitas'}</p>${group.l.toLowerCase()===ownName.toLowerCase()?'<span class="community-own-label">Komunitas Anda</span>':''}<p class="s">${group.members} anggota · ${group.verified} aksi disetujui</p>${group.id?`<button class="btn o sm" data-community-members="${esc(group.id)}">Lihat anggota</button>`:''}</div><div class="community-points"><strong>${format(group.points)}</strong><span class="s">poin</span></div></li>`).join('')}</ol>`;}
 
 /* ---------- resident screens ---------- */
 const SCR={
@@ -177,7 +178,7 @@ home(){const u=U(S.me),p=pts(S.me),i=stg(p),nx=STG[i+1],sd=saldo(S.me),g=S.gain;
  <section class="card home-quiz" aria-labelledby="homeQuizTitle"><h3 id="homeQuizTitle">Kuis minggu ini</h3><p class="s">10 pertanyaan setiap Minggu. Jawaban hanya sekali; hingga 10 poin per minggu.</p><p>${S.quiz?.answered||0}/10 terjawab${S.quiz?.completed?' · Selesai':''}</p><button class="btn n" data-go="kuis">${S.quiz?.completed?'Lihat hasil kuis':'Buka kuis mingguan'}</button></section>
 
  <section class="sec home-feed"><h3>Kegiatan warga terbaru</h3>${activityFeed(S.feed||[])}</section></div>`},
-profil(){return profileForm(U(S.me),S.profileRequired)},
+profil(){return profileForm(U(S.me),S.profileRequired,S.communityOptions||[])},
 kuis(){return quizScreen(S.quiz)},
 
 catat(){const c=S.c;
@@ -211,8 +212,8 @@ artikel(){
  </form><section class="sec"><h2>Pengajuan saya</h2>${S.articles.length?S.articles.slice().reverse().map(article=>articleCard(article)).join(''):'<p class="card s">Belum ada artikel yang diajukan. Lengkapi formulir untuk mengirim cerita kegiatan pertama Anda.</p>'}</section></div>`;
 },
 komunitas(){
- const user=U(S.me),own=S.community.find(group=>group.l.toLowerCase()===communityOf(user).toLowerCase());
- if(!own)return head('Komunitas')+'<div class="pad"><p role="status">Data komunitas belum tersedia. Muat ulang halaman untuk mencoba lagi.</p></div>';
+ const user=U(S.me),own=S.community.find(group=>group.id===user.communityId);
+ if(!own)return head('Komunitas')+`<div class="pad"><p>Pilih kelompok asal melalui profil untuk bergabung.</p><button class="btn n" data-go="profil">Pilih kelompok</button>${communityRankingList(S.community,'')}${membersUI(S)}</div>`;
  const format=value=>new Intl.NumberFormat('id-ID',{maximumFractionDigits:1}).format(value);
  const contribution=pts(S.me),percent=own.points?contribution/own.points*100:0;
  const latest=(S.feed||[]).filter(item=>item.community?.toLowerCase()===own.l.toLowerCase());
@@ -220,7 +221,7 @@ komunitas(){
  <section class="community-welcome" aria-labelledby="communityWelcomeTitle"><div><span class="community-eyebrow">Bergerak bersama</span><h2 id="communityWelcomeTitle">Hai, ${first(user.name)}. Aksimu berarti bagi komunitas.</h2><p>${contribution?`${format(contribution)} poin Anda ikut membangun pencapaian ${esc(own.l)}.`:'Mulai satu aksi hari ini. Kontribusi Anda akan menambah poin bersama.'}</p><div class="community-pulse"><span>${ic('community')} ${format(own.members)} anggota</span><span>${ic('check')} ${format(own.verified)} aksi disetujui</span></div></div><div class="community-greeting-mascot">${bibu(contribution?'proud':'wave')}</div></section>
  <section class="card community-overview" aria-labelledby="myCommunityTitle">
   <div class="community-card-heading"><div><div class="s">Komunitas Anda</div><h2 id="myCommunityTitle">${esc(own.l)}</h2></div><span class="community-position">${own.rank?'#'+own.rank:'Mulai bersama'}</span></div>
-  <p class="s">Komunitas mengikuti asal yang Anda isi pada profil. Kelompok kelurahan tetap tersedia untuk peserta yang belum mencantumkan komunitas.</p>
+  <p class="s">Kelompok mengikuti pilihan asal pada profil. Petugas mengelola daftar kelompok yang dapat dipilih.</p>
   <div class="community-score" data-community-score>${format(own.points)}</div><div class="b">Total poin bersama</div>
   <div class="community-meta"><span>${own.members} anggota</span><span>${own.rank?'Peringkat '+own.rank:'Belum berperingkat'}</span></div>
   <div class="community-contribution"><div class="row sp"><span class="b">Kontribusi Anda</span><span data-community-contribution>${format(contribution)} poin</span></div><div class="bar"><i style="width:${Math.min(100,percent)}%"></i></div><p class="s">${format(percent)}% dari total poin komunitas.</p></div>
@@ -228,14 +229,14 @@ komunitas(){
  </section>
  <section class="sec community-leaderboard" aria-labelledby="communityRankingTitle">
   <h2 id="communityRankingTitle">Peringkat komunitas</h2><p class="s">Akumulasi poin yang diperoleh seluruh anggota sejak awal program.</p>
-  ${communityRankingList(S.community,communityOf(user))}
+  ${communityRankingList(S.community,user.communityId)}${membersUI(S)}
   ${S.community.every(group=>!group.points)?'<p class="community-empty" role="status">Belum ada poin komunitas. Mulai dari satu aksi atau selesaikan materi belajar untuk berkontribusi.</p>':''}
-  <p class="s">Poin bertambah dari aksi harian, belajar, setoran, kuis mingguan, dan artikel yang lolos kurasi. Penukaran hadiah tidak mengurangi total ini. Poin sama mendapat peringkat sama; komunitas tanpa poin belum berperingkat. Nama dan email anggota lain tidak ditampilkan.</p>
+  <p class="s">Poin bertambah dari aksi harian, belajar, setoran, kuis mingguan, dan artikel yang lolos kurasi. Penukaran hadiah tidak mengurangi total ini. Poin sama mendapat peringkat sama; komunitas tanpa poin belum berperingkat. Daftar anggota menampilkan nama dan poin. Email dan WhatsApp tetap khusus petugas.</p>
  </section>
  <section class="community-activity-section"><div class="home-ranking-heading"><div><h2>Aksi terbaru komunitas</h2><p class="s">${S.syncedAt?'Diperbarui '+new Intl.DateTimeFormat('id-ID',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Jakarta'}).format(S.syncedAt)+' WIB.':'Kegiatan yang telah diperiksa petugas.'}</p></div><button type="button" class="btn o sm" data-refresh-community>Perbarui komunitas</button></div>${latest.length?activityFeed(latest):`<div class="card community-first-action"><div class="community-small-mascot">${bibu('idea')}</div><div><h3>Setiap aksi punya tempat di sini.</h3><p class="s">Belum ada aksi ${esc(own.l)} di daftar kegiatan terbaru. Aksi yang disetujui petugas bisa tampil pada daftar ini.</p><button class="btn n sm" data-start>Catat aksi bersama Bibu</button></div></div>`}</section></div>`;
 },
 saya(){const u=U(S.me),p=pts(S.me),my=mine(S.me).slice().reverse();
- const community=S.community.find(group=>group.l.toLowerCase()===communityOf(u).toLowerCase());
+ const community=S.community.find(group=>group.id===u.communityId);
  const B=[['Langkah pertama',ver(S.me)>=1,'leaf'],['Rajin belajar',LES.length>0&&LES.every(lesson=>u.ls.has(lesson.id)),'book'],['Konsisten 3 minggu',weeksActive(S.me)>=3,'clock'],['Aktif beraksi',ver(S.me)>=3,'trophy']];
  return head('Saya')+`<div class="pad profile-layout"><div class="profile-primary"><div class="idcard"><div style="align-self:start"><div class="row" style="gap:4px"><span class="mini">${bibu('happy',{crown:stg(p)>=2})}</span><span style="font-size:var(--fs-s);opacity:.9">Kartu Bibu</span></div><div class="b" style="font-size:var(--fs-l);line-height:1.2;margin-top:2px">${esc(u.name)}</div><div style="opacity:.85;font-size:var(--fs-s)">${esc(u.loc)}</div><div class="id" style="margin-top:8px">${u.bibu}</div></div><div class="qr" id="qr" aria-label="Kode QR Kartu Bibu"></div></div>
  <p class="s" style="margin:-4px 0 0">Tunjukkan kartu ini ke petugas agar aksi Anda bisa dicatatkan.</p>
@@ -321,10 +322,11 @@ function renderA(){const q=acts.filter(a=>a.status==='pending'),tot=Math.round(t
  if(S.atab==='kegiatan')body=activityManagementUI(S);
  if(S.atab==='artikel')body=`<p class="s">Periksa foto, tulisan, pihak terlibat, dan tanggal kejadian. Poin ${ARTICLE_POINTS} hanya untuk artikel yang lolos kurasi.</p><div class="q">${S.articles.length?S.articles.slice().reverse().map(article=>articleCard(article,true)).join(''):'<p class="card s">Belum ada pengajuan artikel.</p>'}</div>`;
  if(S.atab==='kuis')body=quizAdminForm(S.quizAdmin);
+ if(S.atab==='komunitas')body=communityManagementUI(S,LOCS);
  if(S.atab==='belajar')body=`<div class="two"><form id="materialForm" class="card material-form article-form"><h2>Tambah materi belajar</h2><label>Judul materi<input name="title" minlength="3" maxlength="160" required></label><label>Jenis materi<select name="kind" id="materialKind"><option value="text">Teks manual</option><option value="video">Video</option><option value="powerpoint">PowerPoint</option><option value="module">Modul PDF / Word</option></select></label><label>Isi teks / ringkasan<textarea name="body" rows="8" maxlength="30000" minlength="20" required></textarea></label><label data-material-file hidden>Berkas materi (maksimal 50 MB)<input type="file" id="materialFile" accept=".mp4,.ppt,.pptx,.pdf,.doc,.docx"></label><label data-material-url hidden>Tautan video YouTube / Vimeo (jika tidak unggah MP4)<input name="videoUrl" type="url" placeholder="https://…"></label><p class="s">Materi yang diterbitkan langsung tersedia untuk warga. Materi baru dapat ditandai selesai oleh warga; +20 poin hanya sekali.</p><button class="btn n" type="submit">Terbitkan materi</button></form><section class="sec" id="materialManagerPanel">${materialManagementUI(S)}</section></div>`;
  $('#v-admin').innerHTML=`<section class="band phead"><div class="wrap"><div class="dashboard-intro"><div><span class="chip">Dashboard Petugas iLitterless</span><h1 style="margin-top:8px">${q.length} aksi warga menunggu dicek</h1><p class="s">Kelola verifikasi, kurasi artikel, materi belajar, setoran BSIL, serta hadiah warga.</p></div><div class="dashboard-bibu">${bibu('idea')}</div></div>
  <div class="kpis">${[['Menunggu dicek',q.length],['Warga terdaftar',users.length],['Aksi sudah dicek',acts.filter(a=>a.status==='verified').length],['Dibantu petugas',acts.filter(a=>a.src==='petugas'&&a.status!=='cancelled').length],['Setoran BSIL',fmt(tot)+' kg']].map(([k,v])=>`<div class="card kpi"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('')}</div></div></section>
- <section class="band" style="padding-top:16px"><div class="wrap"><div class="tabs">${[['antrian',`Antrian cek (${q.length})`],['kegiatan','Kelola kegiatan'],['artikel','Kurasi artikel'],['kuis','Kelola kuis'],['belajar','Kelola belajar'],['bantu','Bantu catat warga'],['trx','Setoran BSIL'],['peserta','Database warga'],['hadiah','Hadiah & kupon']].map(([k,v])=>`<button data-atab="${k}" class="${S.atab===k?'on':''}">${v}</button>`).join('')}<a class="btn o sm" href="/api/reports/export" download>Unduh laporan CSV</a></div>${body}</div></section>`;
+ <section class="band" style="padding-top:16px"><div class="wrap"><div class="tabs">${[['antrian',`Antrian cek (${q.length})`],['kegiatan','Kelola kegiatan'],['artikel','Kurasi artikel'],['kuis','Kelola kuis'],['belajar','Kelola belajar'],['komunitas','Kelola komunitas'],['bantu','Bantu catat warga'],['trx','Setoran BSIL'],['peserta','Database warga'],['hadiah','Hadiah & kupon']].map(([k,v])=>`<button data-atab="${k}" class="${S.atab===k?'on':''}">${v}</button>`).join('')}<a class="btn o sm" href="/api/reports/export" download>Unduh laporan CSV</a></div>${body}</div></section>`;
  if(S.atab==='peserta')ptab();if(S.atab==='bantu')who()}
 function residentProfileDetails(user){const p=user.profile||{},fields=[['Nama',user.name],['Email',user.email||'Tanpa akun email'],['WhatsApp',p.whatsapp||user.phone||'Belum diisi'],['Jenis asal',originLabels[p.originType]||'Belum diisi'],['Nama asal',p.originName||'Belum diisi'],['Kelurahan',user.loc],['Kecamatan',p.district||'Belum diisi'],['Kota / Kabupaten',p.city||'Belum diisi'],['Status profil',p.completedAt?'Lengkap':'Belum lengkap']];return `<details class="resident-profile-details"><summary>Lihat profil</summary><dl>${fields.map(([label,value])=>`<div><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`).join('')}</dl></details>`;}
 function ptab(query){if(query!==undefined)S.residentFilters.q=query;const filtered=filterResidents(users,S.residentFilters);$('#residentFilterCount').textContent=`Menampilkan ${filtered.length} dari ${users.filter(user=>!user.deletedAt).length} warga`;
@@ -395,6 +397,8 @@ async function loadAccess(){
 }
 function refreshAccess(){S.accessData=null;S.accessError='';S.accessLoading=true;renderSuperadmin();return loadAccess();}
 async function loadLocations(){try{S.locationData=await api('/super-admin/locations');S.locationError='';}catch(error){S.locationError=error.message;}if(S.accessTab==='locations')renderSuperadmin();}
+async function loadGroups(){try{S.groupData=await api('/admin/communities');S.groupError='';}catch(error){S.groupError=error.message;}if(S.role==='admin'&&S.atab==='komunitas')renderA();}
+async function loadMembers(){const id=S.memberGroup;try{const data=await api('/communities/'+encodeURIComponent(id)+'/members?'+new URLSearchParams({page:String(S.memberPage||1),q:S.memberQuery||''}));if(id!==S.memberGroup)return;S.memberData=data;S.memberError='';}catch(error){if(id!==S.memberGroup)return;S.memberError=error.message;}if(S.role==='admin')renderA();else renderP();$('#communityMembers')?.scrollIntoView({block:'start'});}
 function renderMaterials(){const focused=document.activeElement?.matches('#materialSearch [name=q]'),caret=focused?document.activeElement.selectionStart:null;if(S.role==='superadmin')renderSuperadmin();else if(S.role==='admin'){const panel=$('#materialManagerPanel');if(panel)panel.innerHTML=materialManagementUI(S);else renderA();}if(focused){const input=$('#materialSearch [name=q]');input?.focus({preventScroll:true});input?.setSelectionRange(caret,caret);}}
 async function loadMaterials(){const request=S.materialRequest=(S.materialRequest||0)+1;try{const data=await api('/material-management?'+new URLSearchParams({q:S.materialQuery||'',status:S.materialStatus||'',page:String(S.materialPage||1),history:String(!!S.materialHistory)}));if(request!==S.materialRequest)return;S.materialData=data;S.materialError='';}catch(error){if(request!==S.materialRequest)return;S.materialError=error.message;}if((S.role==='admin'&&S.atab==='belajar')||(S.role==='superadmin'&&S.accessTab==='materials'))renderMaterials();}
 function renderSuperadmin(){if(!$('#v-superadmin')||!S.account||S.role!=='superadmin')return;const focused=document.activeElement?.matches('#accessSearch [name=q]'),caret=focused?document.activeElement.selectionStart:null;$('#v-superadmin').innerHTML=accessPage(S)+(S.accessTab==='materials'?'<div class="wrap">'+materialManagementUI(S)+'</div>':S.accessTab==='activities'?'<div class="wrap">'+activityManagementUI(S)+'</div>':S.accessTab==='locations'?'<div class="wrap">'+locationsUI(S)+'</div>':'');if(focused){const input=$('#accessSearch [name=q]');if(input){input.focus({preventScroll:true});input.setSelectionRange(caret,caret);}}if(!['activities','locations','materials'].includes(S.accessTab)&&!S.accessData&&!S.accessError&&!S.accessLoading)loadAccess();}
@@ -448,6 +452,11 @@ document.addEventListener('click',async e=>{const profile=document.querySelector
  if(d.activityCleanup!==undefined){t.disabled=true;try{const result=await api('/activity-management/cleanup/'+d.activityCleanup,{});await loadActivities();toast(result.cleanupStatus==='pending'?'Pembersihan belum berhasil. Coba lagi nanti.':'Status foto diperbarui.');}finally{t.disabled=false;}return;}
  if(d.userOperation!==undefined){const user=S.accessData?.users?.find(user=>user.id===d.userId);if(!user)return;S.userDecision={...user,operation:d.userOperation};renderSuperadmin();$('#accountDecision').scrollIntoView({block:'center'});$('#accountDecision textarea, #accountDecision [type=submit]')?.focus({preventScroll:true});return;}
  if(d.accountDismiss!==undefined){S.userDecision=null;return renderSuperadmin();}
+ if(d.communityMembers!==undefined){S.memberGroup=d.communityMembers;S.memberPage=1;S.memberQuery='';S.memberData=null;return loadMembers();}
+ if(d.membersClose!==undefined){S.memberGroup=null;S.memberData=null;return S.role==='admin'?renderA():renderP();}
+ if(d.memberPage!==undefined){S.memberPage=Number(d.memberPage);return loadMembers();}
+ if(d.groupDelete!==undefined){t.disabled=true;S.groupData=await api('/admin/communities');S.groupDelete=S.groupData.communities.find(row=>row.id===d.groupDelete);renderA();if(!S.groupDelete){toast('Kelompok sudah dihapus.');return;}$('#communityDelete').scrollIntoView({block:'center'});$('#communityDelete textarea').focus();return;}
+ if(d.groupDismiss!==undefined){S.groupDelete=null;return renderA();}
  if(d.materialEdit!==undefined){const lesson=S.materialData?.rows.find(row=>row.id===d.materialEdit);if(!lesson)return;S.materialEdit={id:lesson.id,title:lesson.t,operation:d.operation};renderMaterials();$('#materialDecision').scrollIntoView({block:'center'});$('#materialDecision textarea').focus({preventScroll:true});return;}
  if(d.materialDismiss!==undefined){S.materialEdit=null;return renderMaterials();}
  if(d.materialView!==undefined){S.materialHistory=d.materialView==='history';S.materialPage=1;S.materialEdit=null;S.materialData=null;renderMaterials();return loadMaterials();}
@@ -459,7 +468,7 @@ document.addEventListener('click',async e=>{const profile=document.querySelector
  if(d.accessTab!==undefined){S.accessRequestId=(S.accessRequestId||0)+1;S.accessLoading=false;S.userDecision=null;S.accessTab=d.accessTab;S.accessPage=1;if(d.accessTab==='materials'){S.materialEdit=null;S.materialData=null;renderSuperadmin();return loadMaterials();}if(d.accessTab==='locations'){S.locationData=null;renderSuperadmin();return loadLocations();}if(d.accessTab==='activities'){S.activityData=null;S.activityEdit=null;loadActivities();return renderSuperadmin();}return refreshAccess()}
  if(d.accessPage!==undefined){S.accessPage=Number(d.accessPage);return refreshAccess()}
  if(d.resetResidentFilters!==undefined){S.residentFilters=emptyResidentFilters();return renderA()}
- if(d.logout!==undefined){await api('/auth/logout',{});S.materialRequest=(S.materialRequest||0)+1;S.materialData=null;S.materialEdit=null;S.materialQuery='';S.materialHistory=false;S.materialStatus='';S.materialPage=1;S.materialError='';S.userDecision=null;S.locationData=null;S.locationDraft='';S.locationQuery='';S.locationPage=1;S.locationError='';S.accessRequestId=(S.accessRequestId||0)+1;S.accessLoading=false;S.activityRequest=(S.activityRequest||0)+1;S.activityData=null;S.activityEdit=null;S.activityQuery='';S.activityHistory=false;S.activityPage=1;S.accessData=null;S.accessQuery='';S.accessTab='users';S.accessPage=1;S.accessError='';S.account=null;S.me=null;S.auth='email';S.form={email:'',password:'',name:'',loc:'',err:''};S.wa=[];S.sheet=null;users.length=acts.length=trx.length=0;return route()}
+ if(d.logout!==undefined){await api('/auth/logout',{});S.memberGroup=null;S.memberData=null;S.groupData=null;S.groupDelete=null;S.materialRequest=(S.materialRequest||0)+1;S.materialData=null;S.materialEdit=null;S.materialQuery='';S.materialHistory=false;S.materialStatus='';S.materialPage=1;S.materialError='';S.userDecision=null;S.locationData=null;S.locationDraft='';S.locationQuery='';S.locationPage=1;S.locationError='';S.accessRequestId=(S.accessRequestId||0)+1;S.accessLoading=false;S.activityRequest=(S.activityRequest||0)+1;S.activityData=null;S.activityEdit=null;S.activityQuery='';S.activityHistory=false;S.activityPage=1;S.accessData=null;S.accessQuery='';S.accessTab='users';S.accessPage=1;S.accessError='';S.account=null;S.me=null;S.auth='email';S.form={email:'',password:'',name:'',loc:'',err:''};S.wa=[];S.sheet=null;users.length=acts.length=trx.length=0;return route()}
  if(d.go){S.tab=d.go;renderP();top0();return}
  if(d.start!==undefined){S.c=d.start?{step:2,tile:d.start,photo:null}:{step:1,tile:null,photo:null};S.tab='catat';renderP();top0();return}
  if(d.tile){S.c={step:2,tile:d.tile,photo:null};renderP();top0();return}
@@ -488,7 +497,7 @@ document.addEventListener('click',async e=>{const profile=document.querySelector
  if(d.biloc){S.biLoc=d.biloc;return renderB()}
  if(d.biweek){S.biWeek=+d.biweek;return renderB()}
  if(d.copysum!==undefined){const txt=biSummary();(navigator.clipboard?navigator.clipboard.writeText(txt):Promise.reject()).then(()=>toast('Ringkasan tersalin. Tempel di WhatsApp atau email.'),()=>{S.sheetTxt=txt;toast('Gagal menyalin otomatis. Blok teks ringkasan lalu salin manual.');const n=document.createElement('textarea');n.value=txt;n.style.cssText='width:100%;min-height:180px;margin-top:8px';$('#v-bi .phead .wrap').append(n);n.select()});return}
- if(d.atab){S.atab=d.atab;S.rej=null;if(d.atab==='kuis')S.quizAdmin=await api('/admin/quiz');if(d.atab==='belajar'){S.materialEdit=null;S.materialData=null;loadMaterials();}if(d.atab==='kegiatan'){S.activityEdit=null;S.activityData=null;loadActivities();}return renderA()}
+ if(d.atab){S.atab=d.atab;S.rej=null;if(d.atab==='kuis')S.quizAdmin=await api('/admin/quiz');if(d.atab==='komunitas'){S.groupDelete=null;S.memberGroup=null;await loadGroups();}if(d.atab==='belajar'){S.materialEdit=null;S.materialData=null;loadMaterials();}if(d.atab==='kegiatan'){S.activityEdit=null;S.activityData=null;loadActivities();}return renderA()}
  if(d.rej){S.rej=+d.rej;return renderA()}
  if(d.rejc!==undefined){S.rej=null;return renderA()}
  if(d.huser){S.help.uid=d.huser;return renderA()}
@@ -528,6 +537,9 @@ document.addEventListener('input',e=>{const id=e.target.id,v=e.target.value;
  if(id==='articleBody')S.articleDraft.body=v;if(id==='articleParticipants')S.articleDraft.participants=v;if(id==='articleDate')S.articleDraft.occurredOn=v;
  if(id==='q')ptab(v);if(id==='hq'){S.help.q=v;who()}});
 document.addEventListener('submit',async e=>{
+ if(e.target.id==='groupSearch'){e.preventDefault();S.groupQuery=new FormData(e.target).get('q');renderA();return;}
+ if(e.target.id==='memberSearch'){e.preventDefault();S.memberQuery=new FormData(e.target).get('q');S.memberPage=1;return loadMembers();}
+ if(['communityCreate','communityDelete'].includes(e.target.id)){e.preventDefault();const form=e.target,button=form.querySelector('[type=submit]'),box=form.querySelector('[data-group-error]');if(button.disabled)return;button.disabled=true;box.hidden=true;try{const values=Object.fromEntries(new FormData(form));if(form.id==='communityCreate'){if(values.type==='kelurahan')values.name=values.location;await api('/admin/communities',values);}else await api('/admin/communities/'+S.groupDelete.id+'/delete',values);S.groupDelete=null;await sync();await loadGroups();toast('Kelompok diperbarui.');}catch(error){box.hidden=false;box.textContent=error.message;button.disabled=false;}return;}
  if(e.target.id==='materialSearch'){e.preventDefault();const values=Object.fromEntries(new FormData(e.target));S.materialQuery=values.q;S.materialStatus=values.status;S.materialPage=1;S.materialEdit=null;return loadMaterials();}
  if(e.target.id==='materialDecision'){e.preventDefault();const form=e.target,button=form.querySelector('[type=submit]'),box=form.querySelector('[data-material-error]');if(button.disabled)return;button.disabled=true;box.hidden=true;try{const edit=S.materialEdit,result=await api('/materials/'+edit.id+'/'+edit.operation,Object.fromEntries(new FormData(form)));S.materialEdit=null;await sync();await loadMaterials();toast(result.cleanupStatus==='pending'?'Materi dihapus; coba pembersihan berkas lewat riwayat.':'Perubahan materi tersimpan.');}catch(error){box.hidden=false;box.textContent=error.message;button.disabled=false;}return;}
  if(e.target.id==='locationSearch'){e.preventDefault();S.locationQuery=new FormData(e.target).get('q');S.locationPage=1;renderSuperadmin();return;}
@@ -583,6 +595,8 @@ document.addEventListener('submit',async e=>{
  try{await api('/transactions',{uid,mat:m,kg:k,clientId:crypto.randomUUID()});await sync();toast(`Setoran ${fmt(k)} kg tersimpan.`);renderA();}catch(error){toast(error.message);button.disabled=false;}
 });
 document.addEventListener('change',e=>{
+ if(e.target.matches('#profileForm [name=originType]')){e.target.form.querySelector('[name=communityId]').innerHTML=communityOptions(S.communityOptions||[],e.target.value);return;}
+ if(e.target.id==='communityType'){const form=e.target.form,local=e.target.value==='kelurahan';form.querySelector('[data-group-location]').hidden=!local;form.querySelector('[name=location]').disabled=!local;form.querySelector('[data-group-name]').hidden=local;form.querySelector('[name=name]').disabled=local;form.querySelector('[name=name]').required=!local;return;}
  if(e.target.id==='locationFile'){const file=e.target.files[0];if(!file)return;if(file.size>150000){toast('Berkas maksimal 150 KB.');return;}file.text().then(text=>{if(S.accessTab!=='locations')return;S.locationDraft=text;renderSuperadmin();}).catch(()=>toast('Berkas tidak dapat dibaca.'));return;}
  if(e.target.matches('[data-resident-filter]')){const key=e.target.dataset.residentFilter;S.residentFilters[key]=e.target.value;if(key==='type')S.residentFilters.origin='';if(key==='city')S.residentFilters.district='';renderA();return;}
  if(e.target.id==='quizWeekSelect'){S.quizAdmin.editWeek=e.target.value;renderA();return;}

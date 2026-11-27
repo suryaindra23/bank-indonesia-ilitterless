@@ -16,6 +16,7 @@ import {mountAdminManagement} from './admin-management.js';
 import { mountArticles } from './articles.js';
 import { mountMaterials } from './materials.js';
 import {mountMaterialManagement} from './material-management.js';
+import {initializeCommunities,mountCommunities} from './communities.js';
 import { createMailer } from './mail.js';
 import { communityStandings } from '../shared/community.js';
 import { co2e } from '../shared/carbon.js';
@@ -80,6 +81,7 @@ export async function createApp({ dataDir = path.resolve('data'), dbPath, limit 
   });
   if((await read()).rewards.some(reward=>reward.n==='Tumbler KOBI'))await transaction('system','brand.cobi.catalog',state=>{for(const reward of state.rewards)if(reward.n==='Tumbler KOBI')reward.n='Tumbler COBI';});
   const pilotStart = process.env.PILOT_START || (await read()).pilotStart || '2026-11-09';
+  await initializeCommunities({read,transaction});
   if (!/^\d{4}-\d{2}-\d{2}$/.test(pilotStart) || !Number.isFinite(Date.parse(pilotStart))) throw Error('PILOT_START harus YYYY-MM-DD');
   const date = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
   const week = () => Math.max(1, Math.floor((Date.parse(date()) - Date.parse(pilotStart)) / 604800000) + 1);
@@ -189,6 +191,7 @@ export async function createApp({ dataDir = path.resolve('data'), dbPath, limit 
   app.get('/api/bootstrap', requireRole(), async (req, res) => res.json(await bootstrap(req.account)));
   app.get('/api/communities', requireRole(), async (_req, res) => res.json({ communities: communityStandings(await read()) }));
   mountParticipation(app,{read,transaction,db,requireRole,storage,now});
+  mountCommunities(app,{db,read,transaction,requireRole,rolesFor});
   mountAccess(app,{db,read,write,rolesFor,requireRole,limitAccess:rateLimit({windowMs:15*60*1000,limit:100,standardHeaders:'draft-8',legacyHeaders:false,message:{error:'Terlalu banyak perubahan akses. Coba lagi nanti.'}})});
   mountAdminManagement(app,{db,read,write,transaction,rolesFor,requireRole,sendToken,limitAccess:rateLimit({windowMs:15*60*1000,limit:100,standardHeaders:'draft-8',legacyHeaders:false,message:{error:'Terlalu banyak perubahan. Coba lagi nanti.'}})});
   app.use('/api',async(req,res,next)=>{

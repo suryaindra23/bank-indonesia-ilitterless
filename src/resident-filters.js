@@ -1,5 +1,5 @@
 import {escapeHTML as e} from './participation-ui.js';
-export const originLabels={komunitas:'Komunitas',instansi:'Instansi',event:'Event',lainnya:'Lainnya',unknown:'Belum diisi'};
+export const originLabels={kelurahan:'Kelurahan',komunitas:'Komunitas',instansi:'Instansi',event:'Event',lainnya:'Lainnya',unknown:'Belum diisi'};
 export const emptyResidentFilters=()=>({q:'',type:'',origin:'',city:'',district:'',loc:''});
 const typeOf=user=>user.profile?.originType||'unknown';
 const normal=value=>String(value||'').trim().toLocaleLowerCase('id-ID');

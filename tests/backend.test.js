@@ -14,7 +14,7 @@ async function fixture(t,options={}) {
   const dataDir = mkdtempSync(path.join(tmpdir(), 'bibu-test-'));
   const pg=process.env.TEST_POSTGRES?new PGlite():null;
   const database=pg?await openDatabase({postgresClient:pg}):undefined;
-  const messages = [],mailer = { send: async (message) => messages.push(message) };const core = await createApp({ dataDir, limit: 1000, mailer, database,...options });const server = core.app.listen(0, '127.0.0.1');await new Promise((r) => server.once('listening', r));const base = 'http://127.0.0.1:' + server.address().port;
+  const messages = [],mailer = { send: async (message) => messages.push(message) };const core = await createApp({ dataDir, limit: 1000, mailer, database,...options });const initial=await core.read();for(const [type,name] of [['komunitas','Tlogomas'],['instansi','SMA Pengujian']])initial.communities.push({id:randomUUID(),type,name});await core.write(initial);const server = core.app.listen(0, '127.0.0.1');await new Promise((r) => server.once('listening', r));const base = 'http://127.0.0.1:' + server.address().port;
   t.after(async () => {await new Promise((r) => server.close(r));await core.db.close();if(pg)await pg.close();rmSync(dataDir, { recursive: true, force: true });});
   async function call(url, body, cookie = '', headers = {}) {const res = await fetch(base + '/api' + url, { method: body === undefined ? 'GET' : 'POST', headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), Cookie: cookie, ...headers }, body: body === undefined ? undefined : JSON.stringify(body) });return { status: res.status, cookie: res.headers.get('set-cookie')?.split(';')[0], body: res.headers.get('content-type')?.includes('application/json') ? await res.json() : await res.text(), headers: res.headers };}
   async function resident(email = 'warga@example.test',complete=true) {const result = await call('/auth/register', { email, password: secret, name: 'Warga Pengujian', loc: 'Tlogomas' });assert.equal(result.status, 201);assert.equal(result.body.needsVerification, true);assert.equal(result.cookie, undefined);const token = new URL(messages.at(-1).text.match(/https?:\/\/\S+/)[0]).searchParams.get('token');const verified = await call('/auth/verify', { token });assert.equal(verified.status, 200);if(complete)assert.equal((await call('/profile',{name:'Warga Pengujian',originType:'komunitas',originName:'Tlogomas',whatsapp:'081234567890',district:'Lowokwaru',city:'Kota Malang'},verified.cookie)).status,200);return { ...verified, status: 201 };}
@@ -80,8 +80,8 @@ test('community API aggregates all members without exposing resident identities'
   await f.call('/lessons/l1/complete', {}, a.cookie);
   await f.call('/transactions', { uid: b.body.account.id, mat: 'Kertas', kg: 1, clientId: 'community-deposit' }, admin.cookie);
   const response = await f.call('/communities', undefined, a.cookie);assert.equal(response.status, 200);
-  const own = response.body.communities.find((group) => group.l === 'Tlogomas');assert.equal(own.points, 50);assert.equal(own.members, 2);assert.equal(own.rank, 1);
-  assert.deepEqual(Object.keys(own).sort(), ['l', 'members', 'points', 'rank', 'v', 'verified']);
+  const own = response.body.communities.find((group) => group.l === 'Tlogomas'&&group.type==='komunitas');assert.equal(own.points, 50);assert.equal(own.members, 2);assert.equal(own.rank, 1);
+  assert.deepEqual(Object.keys(own).sort(), ['id','l', 'members', 'points', 'rank','type', 'v', 'verified']);
   const bootstrap = (await f.call('/bootstrap', undefined, a.cookie)).body;assert.equal(bootstrap.users.length, 1);assert.deepEqual(bootstrap.community, response.body.communities);
   assert.equal((await f.call('/communities', { points: 9999 }, a.cookie)).status, 404);
 });
@@ -197,7 +197,7 @@ test('public landing statistics and feed use verified data without personal iden
  const f=await fixture(t),resident=await f.resident(),admin=await f.staff('admin');
  const action=(await f.call('/actions',{tile:'tas',photo,clientId:'feed-action'},resident.cookie)).body.action;
  assert.equal((await fetch(f.base+'/api/public/activity-photos/'+action.id)).status,404);
- const before=(await f.call('/public/overview')).body;assert.equal(before.stats.communities,1);assert.equal(before.stats.communityMembers,1);assert.equal(before.stats.communityActivities,0);assert.equal(before.feed.length,0);
+ const before=(await f.call('/public/overview')).body;assert.equal(before.stats.communities,5);assert.equal(before.stats.communityMembers,1);assert.equal(before.stats.communityActivities,0);assert.equal(before.feed.length,0);
  await f.call('/actions/'+action.id+'/review',{status:'verified'},admin.cookie);await f.call('/transactions',{uid:resident.body.account.id,mat:'Plastik',kg:2.5,clientId:'landing-deposit'},admin.cookie);
  const after=(await f.call('/public/overview')).body;assert.equal(after.stats.wasteKg,2.5);assert.equal(after.stats.communityActivities,1);assert.equal(after.feed[0].title,'Pakai tas kain');assert.equal(after.feed[0].community,'Tlogomas');assert.equal(after.feed[0].photo,'/api/public/activity-photos/'+action.id);const image=await fetch(f.base+after.feed[0].photo);assert.equal(image.status,200);assert.match(image.headers.get('content-type'),/image/);assert.equal((await fetch(f.base+action.photo)).status,401);
  const json=JSON.stringify(after);for(const privateValue of ['warga@example.test','081234567890','/api/photos/','password_hash','Warga Pengujian'])assert.ok(!json.includes(privateValue));
@@ -347,4 +347,21 @@ test('failed material cleanup is audited and retryable only by Super Admin',asyn
  const deleted=await f.call('/materials/'+id+'/delete',{reason:'Hapus berkas pengujian',confirmation:'HAPUS'},root.cookie);assert.equal(deleted.body.cleanupStatus,'pending');assert.ok(!(await f.read()).lessons.some(item=>item.id===id));
  assert.equal((await f.call('/material-management/cleanup/'+deleted.body.id,{},admin.cookie)).status,403);broken=false;assert.equal((await f.call('/material-management/cleanup/'+deleted.body.id,{},root.cookie)).body.cleanupStatus,'done');
  const history=(await f.call('/material-management?history=true',undefined,root.cookie)).body;assert.equal(history.rows[0].cleanupStatus,'done');assert.ok(!JSON.stringify(history).includes('materials/'));
+});
+test('staff controls group catalog; citizen chooses a managed origin and member directory exposes only names and points',async t=>{
+ const f=await fixture(t),admin=await f.staff('admin'),resident=await f.resident(),bi=await f.staff('bi');
+ assert.equal((await f.call('/admin/communities',{type:'komunitas',name:'Hijau Baru'},resident.cookie)).status,403);
+ const created=await f.call('/admin/communities',{type:'komunitas',name:'Hijau Baru'},admin.cookie);assert.equal(created.status,201);const group=created.body.group;
+ assert.equal((await f.call('/admin/communities',{type:'komunitas',name:'hijau baru'},admin.cookie)).status,409);
+ const profile={name:'Anggota Hijau',originType:'komunitas',communityId:group.id,whatsapp:'081234567890',district:'Lowokwaru',city:'Malang'};
+ assert.equal((await f.call('/profile',{...profile,communityId:'unmanaged'},resident.cookie)).status,400);assert.equal((await f.call('/profile',profile,resident.cookie)).status,200);
+ const list=(await f.call('/communities/'+group.id+'/members',undefined,resident.cookie)).body;assert.equal(list.total,1);assert.deepEqual(Object.keys(list.members[0]).sort(),['name','points']);assert.equal(list.members[0].name,'Anggota Hijau');assert.ok(!JSON.stringify(list).includes('081234567890'));
+ assert.equal((await f.call('/profile',{...profile,originType:'instansi'},resident.cookie)).status,400);
+ const snapshot=await f.read(),template=snapshot.users.find(user=>user.id===resident.body.account.id);for(let index=0;index<20;index++)snapshot.users.push({...structuredClone(template),id:randomUUID(),name:'Anggota Halaman '+String(index).padStart(2,'0'),email:'',ls:[]});await f.write(snapshot);
+ const second=(await f.call('/communities/'+group.id+'/members?page=2',undefined,resident.cookie)).body;assert.equal(second.total,21);assert.equal(second.members.length,1);assert.equal((await f.call('/communities/'+group.id+'/members?q=Halaman',undefined,resident.cookie)).body.total,20);
+ assert.equal((await f.call('/admin/communities/'+group.id+'/delete',{reason:'Kelompok digabung',confirmation:'HAPUS'},admin.cookie)).status,409);
+ const target=(await f.call('/community-options',undefined,resident.cookie)).body.communities.find(row=>row.type==='kelurahan');
+ assert.equal((await f.call('/admin/communities/'+group.id+'/delete',{reason:'Kelompok digabung',confirmation:'HAPUS',targetId:target.id},admin.cookie)).status,200);
+ assert.equal((await f.call('/communities/'+group.id+'/members',undefined,resident.cookie)).status,404);assert.equal((await f.call('/profile',profile,resident.cookie)).status,400);const user=(await f.call('/bootstrap',undefined,resident.cookie)).body.users[0];assert.equal(user.communityId,target.id);assert.equal(user.profile.originType,'kelurahan');
+ assert.equal((await f.call('/communities/'+target.id+'/members',undefined,bi.cookie)).status,403);
 });
