@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="id" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#0B2D6B">
+<title>Dashboard Bank Indonesia | COBI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/src/styles.css">
+</head>
+<body class="resident-app dashboard-page" data-dashboard-role="bi">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs id="bdefs"></defs></svg>
+<header class="resident-header">
+ <a class="resident-brand" href="/bank-indonesia/" aria-label="Dashboard Bank Indonesia COBI"><img src="/brand/ilitterless-symbol.png" width="52" height="52" alt="Ikon paus iLitterless"><div class="brand-wordmark"><strong>COBI</strong><small>Community Base Of iLitterless Indonesia</small></div></a>
+ <div id="accountMenu" class="account-menu" hidden></div>
+</header>
+<main id="v-peserta"><div class="stage">
+ <aside class="desktop-welcome"><span class="logo">Bank Indonesia</span><h1>Pantau partisipasi.<br>Lihat dampak program.</h1><p>Indikator warga, perkembangan mingguan, dan hasil setoran BSIL dalam laporan agregat.</p><div id="desktop-bibu" aria-hidden="true"></div><p class="s">Akses baca saja menggunakan akun Bank Indonesia.</p></aside>
+ <div class="phone noauth" id="phone" aria-label="COBI"><div class="scr" id="scr"></div><nav class="tabbar" id="tabbar" aria-label="Menu utama"></nav><div id="net" role="status"></div><div id="sheet"></div><div id="wa"></div></div>
+</div></main>
+<main id="v-admin" class="panel" hidden></main>
+<main id="v-bi" hidden></main>
+<main id="v-superadmin" class="panel" hidden></main>
+<div class="toast" id="toast" role="status"></div>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>

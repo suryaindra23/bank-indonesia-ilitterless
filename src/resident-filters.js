@@ -1,0 +1,14 @@
+import {escapeHTML as e} from './participation-ui.js';
+export const originLabels={komunitas:'Komunitas',instansi:'Instansi',event:'Event',lainnya:'Lainnya',unknown:'Belum diisi'};
+export const emptyResidentFilters=()=>({q:'',type:'',origin:'',city:'',district:'',loc:''});
+const typeOf=user=>user.profile?.originType||'unknown';
+const normal=value=>String(value||'').trim().toLocaleLowerCase('id-ID');
+const values=(users,get)=>[...new Map(users.map(get).filter(Boolean).map(value=>[normal(value),value])).values()].sort((a,b)=>a.localeCompare(b,'id'));
+function select(name,label,options,value){return `<label>${label}<select data-resident-filter="${name}"><option value="">Semua</option>${options.map(([key,text])=>`<option value="${e(key)}" ${value===key?'selected':''}>${e(text)}</option>`).join('')}</select></label>`;}
+export function residentFiltersUI(users,filters){
+ const origins=values(users.filter(user=>!filters.type||typeOf(user)===filters.type),user=>user.profile?.originName),cities=values(users,user=>user.profile?.city),districts=values(users.filter(user=>!filters.city||normal(user.profile?.city)===normal(filters.city)),user=>user.profile?.district);
+ return `<section class="resident-filter-panel" aria-labelledby="residentFilterTitle"><div class="row sp"><h2 id="residentFilterTitle">Filter database warga</h2><button type="button" class="btn o sm" data-reset-resident-filters>Reset filter</button></div><label class="resident-search">Cari warga<input type="search" id="q" value="${e(filters.q)}" placeholder="Nama, Bibu ID, asal, atau wilayah" aria-controls="ptab"></label><div class="resident-filter-grid">${select('type','Jenis asal',Object.entries(originLabels),filters.type)}${select('origin','Nama asal',origins.map(value=>[value,value]),filters.origin)}${select('city','Kota / Kabupaten',cities.map(value=>[value,value]),filters.city)}${select('district','Kecamatan',districts.map(value=>[value,value]),filters.district)}${select('loc','Kelurahan',values(users,user=>user.loc).map(value=>[value,value]),filters.loc)}</div><p class="s" id="residentFilterCount" role="status" aria-live="polite"></p></section>`;
+}
+export function filterResidents(users,filters){const query=filters.q.trim().toLocaleLowerCase('id-ID');return users.filter(user=>{
+ const p=user.profile||{};return !user.deletedAt&&(!query||[user.name,user.bibu,user.email,user.phone,p.whatsapp,user.loc,p.originName,p.city,p.district].filter(Boolean).join(' ').toLocaleLowerCase('id-ID').includes(query))&&(!filters.type||typeOf(user)===filters.type)&&(!filters.origin||normal(p.originName)===normal(filters.origin))&&(!filters.city||normal(p.city)===normal(filters.city))&&(!filters.district||normal(p.district)===normal(filters.district))&&(!filters.loc||normal(user.loc)===normal(filters.loc));
+ });}

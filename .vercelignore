@@ -1,0 +1,8 @@
+.env
+.env.*
+!.env.example
+data/
+test-results/
+playwright-report/
+node_modules/
+.git/
