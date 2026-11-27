@@ -15,6 +15,7 @@ import {locationNames} from '../shared/locations.js';
 import {mountAdminManagement} from './admin-management.js';
 import { mountArticles } from './articles.js';
 import { mountMaterials } from './materials.js';
+import {mountMaterialManagement} from './material-management.js';
 import { createMailer } from './mail.js';
 import { communityStandings } from '../shared/community.js';
 import { co2e } from '../shared/carbon.js';
@@ -183,7 +184,7 @@ export async function createApp({ dataDir = path.resolve('data'), dbPath, limit 
     if (account.role === 'bi') for (const u of users) {u.name = 'Warga';delete u.email;delete u.profile;u.phone='';u.notes = [];u.vouchers = [];}
     const community = communityStandings(state);
     const articles = (state.articles || []).filter((a) => !scoped || a.uid === uid).map((a) => account.role === 'bi' ? { id: a.id, uid: a.uid, status: a.status, week: a.week } : a);
-    return { account: publicAccount(account), locations:locationNames(state,true),reportLocations:locationNames(state),users, acts: acts.map((a) => account.role === 'bi' ? { ...a, photo: '', reviewedBy: undefined } : a), articles, lessons: state.lessons.map(({q,...lesson})=>({...lesson,q:null})), profileRequired:scoped&&!profileComplete(state.users.find(user=>user.id===uid)), feed:publicOverview(state).feed, trx: state.trx.filter((t) => !scoped || t.uid === uid), rewards: state.rewards, community, week: week(),pilotStart, curationEmail: process.env.CURATION_EMAIL || 'ilitterless@gmail.com' };
+    return { account: publicAccount(account), locations:locationNames(state,true),reportLocations:locationNames(state),users, acts: acts.map((a) => account.role === 'bi' ? { ...a, photo: '', reviewedBy: undefined } : a), articles, lessons: state.lessons.filter(lesson=>!lesson.archived||['admin','superadmin'].includes(account.role)).map(({q,...lesson})=>({...lesson,q:null})), profileRequired:scoped&&!profileComplete(state.users.find(user=>user.id===uid)), feed:publicOverview(state).feed, trx: state.trx.filter((t) => !scoped || t.uid === uid), rewards: state.rewards, community, week: week(),pilotStart, curationEmail: process.env.CURATION_EMAIL || 'ilitterless@gmail.com' };
   }
   app.get('/api/bootstrap', requireRole(), async (req, res) => res.json(await bootstrap(req.account)));
   app.get('/api/communities', requireRole(), async (_req, res) => res.json({ communities: communityStandings(await read()) }));
@@ -216,6 +217,7 @@ export async function createApp({ dataDir = path.resolve('data'), dbPath, limit 
   }
   mountArticles(app, { read, transaction, requireRole, savePhoto, mailer, storage, date, week, notify });
   mountMaterials(app, { read, transaction, requireRole, dataDir, storage });
+  mountMaterialManagement(app,{db,read,transaction,requireRole,rolesFor,storage});
   mountUploads(app,{storage,read,transaction,requireRole});
   app.get('/api/photos/:name', requireRole('peserta', 'admin','superadmin'), async (req, res) => {
     const state = await read(),photo = '/api/photos/' + req.params.name;

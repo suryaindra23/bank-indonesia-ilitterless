@@ -22,7 +22,7 @@ export function mountUploads(app,{storage,read,transaction,requireRole}){
   if(pending.purpose==='material'&&!req.account.roles.includes('admin'))fail(403,'Akses tidak diizinkan.');
   if(!pending.completed){const object=await storage.inspect(pending.key);if(object.size!==pending.size||!validHeader(path.extname(pending.filename),object.header)){await storage.remove(pending.key);fail(400,'Isi berkas tidak cocok dengan format atau ukuran.');}}
   const file=await transaction(req.account.id,'upload.complete',state=>{
-   const upload=state.uploads.find(upload=>upload.id===pending.id);upload.completed=true;
+   const upload=state.uploads.find(upload=>upload.id===pending.id);if(!upload)fail(410,'Unggahan telah dihapus pengelola.');upload.completed=true;
    if(upload.purpose==='photo')return {photo:'/api/photos/'+upload.filename};
    state.materialFiles??=[];let file=state.materialFiles.find(file=>file.id===upload.id);if(!file){file={id:upload.id,filename:upload.filename,name:upload.name,kind:upload.kind,mime:upload.mime,size:upload.size,createdBy:upload.uid};state.materialFiles.push(file);}return {file:{id:file.id,name:file.name,kind:file.kind,size:file.size}};
   });res.json(file);

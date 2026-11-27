@@ -316,3 +316,35 @@ test('deleting an account revokes access, anonymizes profile and preserves activ
  assert.equal((await f.call('/super-admin/users/'+uid+'/delete',{reason:'Ulang permintaan',confirmation:'HAPUS'},root.cookie)).status,404);
  assert.ok((await f.call('/super-admin/admin-history',undefined,root.cookie)).body.events.some(event=>event.operation==='user.delete'&&event.details.reason==='Permintaan pengguna'));
 });
+test('material archive/restore and permanent delete preserve earned points and block stale completion',async t=>{
+ const f=await fixture(t),admin=await f.staff('admin'),root=await f.staff('superadmin'),resident=await f.resident(),body={title:'Materi daur ulang',kind:'text',body:'Pelajari cara memilah sampah agar dapat didaur ulang.',clientId:'manage-text'};
+ const lesson=(await f.call('/materials',body,admin.cookie)).body.material;
+ assert.equal((await f.call('/lessons/'+lesson.id+'/complete',{},resident.cookie)).body.awarded,20);
+ assert.equal((await f.call('/materials/'+lesson.id+'/archive',{reason:'Materi ditinjau ulang'},resident.cookie)).status,403);
+ assert.equal((await f.call('/materials/'+lesson.id+'/archive',{reason:'Materi ditinjau ulang'},admin.cookie)).status,200);
+ assert.ok(!(await f.call('/bootstrap',undefined,resident.cookie)).body.lessons.some(item=>item.id===lesson.id));assert.equal((await f.call('/bootstrap',undefined,resident.cookie)).body.users[0].points,20);
+ assert.equal((await f.call('/lessons/'+lesson.id+'/complete',{},resident.cookie)).status,404);
+ assert.equal((await f.call('/materials/'+lesson.id+'/restore',{reason:'Isi telah disetujui'},admin.cookie)).status,200);
+ assert.equal((await f.call('/lessons/'+lesson.id+'/complete',{},resident.cookie)).body.awarded,0);
+ assert.equal((await f.call('/materials/'+lesson.id+'/delete',{reason:'Materi tidak digunakan',confirmation:'HAPUS'},admin.cookie)).status,403);
+ assert.equal((await f.call('/materials/'+lesson.id+'/delete',{reason:'Materi tidak digunakan',confirmation:'YA'},root.cookie)).status,400);
+ assert.equal((await f.call('/materials/'+lesson.id+'/delete',{reason:'Materi tidak digunakan',confirmation:'HAPUS'},root.cookie)).status,200);
+ assert.equal((await f.call('/bootstrap',undefined,resident.cookie)).body.users[0].points,20);assert.equal((await f.call('/materials',body,admin.cookie)).status,410);
+ const history=(await f.call('/material-management?history=true',undefined,root.cookie)).body;assert.deepEqual(history.rows.map(row=>row.operation),['delete','restore','archive']);assert.equal(history.rows[0].actor,'superadmin@example.test');
+});
+test('archived material file access is denied to citizens; shared files are removed only after last lesson is deleted',async t=>{
+ const f=await fixture(t),admin=await f.staff('admin'),root=await f.staff('superadmin'),resident=await f.resident();
+ const form=new FormData();form.append('file',new Blob(['%PDF-1.7\nTransport test'],{type:'application/pdf'}),'modul.pdf');const uploaded=await fetch(f.base+'/api/materials/file',{method:'POST',headers:{Cookie:admin.cookie},body:form}),file=(await uploaded.json()).file;
+ const body={title:'Materi berbagi berkas',kind:'module',fileId:file.id};const first=(await f.call('/materials',{...body,clientId:'shared-one'},admin.cookie)).body.material,second=(await f.call('/materials',{...body,clientId:'shared-two'},admin.cookie)).body.material;
+ for(const lesson of [first,second])await f.call('/materials/'+lesson.id+'/archive',{reason:'Peninjauan berkas'},admin.cookie);
+ assert.equal((await fetch(f.base+'/api/material-files/'+file.id,{headers:{Cookie:resident.cookie}})).status,404);assert.equal((await fetch(f.base+'/api/material-files/'+file.id,{headers:{Cookie:admin.cookie}})).status,200);
+ await f.call('/materials/'+first.id+'/delete',{reason:'Bersihkan materi pertama',confirmation:'HAPUS'},root.cookie);assert.ok((await f.read()).materialFiles.some(item=>item.id===file.id));
+ const removed=await f.call('/materials/'+second.id+'/delete',{reason:'Bersihkan materi terakhir',confirmation:'HAPUS'},root.cookie);assert.equal(removed.body.cleanupStatus,'done');assert.ok(!(await f.read()).materialFiles.some(item=>item.id===file.id));assert.equal((await fetch(f.base+'/api/material-files/'+file.id,{headers:{Cookie:admin.cookie}})).status,404);
+});
+test('failed material cleanup is audited and retryable only by Super Admin',async t=>{
+ let broken=true;const objectStore={remote:false,async remove(){if(broken)throw Error('Storage unavailable');}};const f=await fixture(t,{objectStore}),root=await f.staff('superadmin'),admin=await f.staff('admin');
+ const state=await f.read(),id='material-cleanup-test',fileId=randomUUID();state.materialFiles??=[];state.materialFiles.push({id:fileId,filename:randomUUID()+'.pdf',kind:'module',mime:'application/pdf'});state.lessons.push({id,t:'Berkas uji pembersihan',fileId,body:[],kind:'module'});await f.write(state);
+ const deleted=await f.call('/materials/'+id+'/delete',{reason:'Hapus berkas pengujian',confirmation:'HAPUS'},root.cookie);assert.equal(deleted.body.cleanupStatus,'pending');assert.ok(!(await f.read()).lessons.some(item=>item.id===id));
+ assert.equal((await f.call('/material-management/cleanup/'+deleted.body.id,{},admin.cookie)).status,403);broken=false;assert.equal((await f.call('/material-management/cleanup/'+deleted.body.id,{},root.cookie)).body.cleanupStatus,'done');
+ const history=(await f.call('/material-management?history=true',undefined,root.cookie)).body;assert.equal(history.rows[0].cleanupStatus,'done');assert.ok(!JSON.stringify(history).includes('materials/'));
+});

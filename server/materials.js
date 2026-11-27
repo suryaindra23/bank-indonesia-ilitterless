@@ -38,14 +38,13 @@ export function mountMaterials(app, { read, transaction, requireRole, dataDir, s
     if (kind !== 'text' && !(kind === 'video' && !fileId) && (!file || file.kind !== kind)) fail(400, 'Unggah berkas sesuai jenis materi.');
     const videoEmbed = kind === 'video' && !fileId ? embedURL(videoUrl) : null;
     const material = { id: 'material-' + randomUUID(), title: title.trim(), t: title.trim(), kind, c: '#007573', i: 'book', body: body.trim() ? [body.trim()] : [], fileId: kind === 'text' ? null : file?.id || null, fileName: file?.name || null, fileMime:file?.mime||null, videoEmbed, q: null, clientId, createdBy: req.account.id, createdAt: new Date().toISOString() };
-    const result = await transaction(req.account.id, 'material.publish', (snapshot) => {snapshot.lessons ??= [];const old = snapshot.lessons.find((lesson) => lesson.clientId === clientId);if (old) return old;snapshot.lessons.push(material);return material;});res.status(201).json({ material: result });
+    const result = await transaction(req.account.id, 'material.publish', (snapshot) => {snapshot.lessons ??= [];if(snapshot.deletedMaterialClients?.includes(clientId))fail(410,'Materi sudah dihapus. Buat materi baru.');const old = snapshot.lessons.find((lesson) => lesson.clientId === clientId);if (old) return old;if(material.fileId&&!snapshot.materialFiles?.some(file=>file.id===material.fileId))fail(409,'Berkas sudah dihapus. Unggah ulang.');snapshot.lessons.push(material);return material;});res.status(201).json({ material: result });
   });
   app.get('/api/material-files/:id', requireRole(), async (req, res) => {
-    const state = await read(),file = state.materialFiles?.find((file) => file.id === req.params.id);if (!file || !req.account.roles.includes('admin') && !state.lessons?.some((lesson) => lesson.fileId === file.id)) fail(404, 'Berkas materi tidak ditemukan.');
+    const state = await read(),file = state.materialFiles?.find((file) => file.id === req.params.id);if (!file || !['admin','superadmin'].includes(req.account.role) && !state.lessons?.some((lesson) => lesson.fileId === file.id&&!lesson.archived)) fail(404, 'Berkas materi tidak ditemukan.');
     await storage.serve(res,'materials/'+file.filename,{mime:file.mime,name:file.name,download:!(file.mime==='application/pdf'||file.kind==='video')});
   });
   app.post('/api/lessons/:id/complete', requireRole('peserta'), async (req, res) => {
-    const lesson = (await read()).lessons?.find((lesson) => lesson.id === req.params.id);if (!lesson) fail(404, 'Materi tidak ditemukan.');
-    const awarded = await transaction(req.account.id, 'material.complete', (state) => {const user = state.users.find((user) => user.id === req.account.id);if (user.ls.includes(lesson.id)) return 0;user.ls.push(lesson.id);return 20;});res.json({ awarded });
+    const awarded = await transaction(req.account.id, 'material.complete', (state) => {const lesson=state.lessons?.find(lesson=>lesson.id===req.params.id&&!lesson.archived);if(!lesson)fail(404,'Materi tidak tersedia atau telah diarsipkan.');const user = state.users.find((user) => user.id === req.account.id);if (user.ls.includes(lesson.id)) return 0;user.ls.push(lesson.id);return 20;});res.json({ awarded });
   });
 }
